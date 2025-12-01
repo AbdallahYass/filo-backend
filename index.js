@@ -25,22 +25,23 @@ const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
 
 
+// إعدادات Brevo باستخدام المنفذ البديل 2525
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 587, // المنفذ القياسي
-    secure: false, // false للمنفذ 587
+    port: 2525, // 👈 هذا هو الحل! غيرنا 587 إلى 2525
+    secure: false, // هذا المنفذ لا يستخدم SSL المباشر
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
-    // 👇👇👇 إضافات مهمة جداً لمنع التعليق
+    // إعدادات لتجاوز مشاكل التشفير والشبكة
     tls: {
         ciphers: 'SSLv3',
-        rejectUnauthorized: false // تجاوز مشاكل الشهادات أحياناً
+        rejectUnauthorized: false
     },
-    connectionTimeout: 10000, // 10 ثواني حد أقصى للاتصال
-    greetingTimeout: 10000,   // 10 ثواني للترحيب
-    socketTimeout: 10000      // 10 ثواني لإنهاء العملية
+    connectionTimeout: 20000, // زدنا الوقت لـ 20 ثانية
+    greetingTimeout: 20000,
+    socketTimeout: 20000
 });
 
 // الحماية (API Key)
