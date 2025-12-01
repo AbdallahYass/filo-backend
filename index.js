@@ -27,12 +27,20 @@ app.use(limiter);
 
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 587, // 👈 ارجع للمنفذ الرسمي
-    secure: false, // false مع منفذ 587
+    port: 587, // المنفذ القياسي
+    secure: false, // false للمنفذ 587
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-    }
+    },
+    // 👇👇👇 إضافات مهمة جداً لمنع التعليق
+    tls: {
+        ciphers: 'SSLv3',
+        rejectUnauthorized: false // تجاوز مشاكل الشهادات أحياناً
+    },
+    connectionTimeout: 10000, // 10 ثواني حد أقصى للاتصال
+    greetingTimeout: 10000,   // 10 ثواني للترحيب
+    socketTimeout: 10000      // 10 ثواني لإنهاء العملية
 });
 
 // الحماية (API Key)
@@ -90,7 +98,6 @@ app.post('/api/auth/register', async (req, res) => {
         });
         await newUser.save();
 
-        // إرسال الإيميل الرسمي
         // تصميم الرسالة (HTML)
         const emailDesign = `
         <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
@@ -122,18 +129,22 @@ app.post('/api/auth/register', async (req, res) => {
         `;
 
         // إرسال الإيميل
+        console.log("جاري محاولة إرسال الإيميل إلى:", email); // 🔍 تتبع 1
+
+        // إرسال الإيميل
         await transporter.sendMail({
-            from: '"Filo Menu Team" <no-reply@filomenu.com>',
+            from: '"Filo Menu Support" <no-reply@filomenu.com>',
             to: email,
             subject: '🔐 رمز تفعيل حسابك - Filo Menu',
-            html: emailDesign // 👈 لاحظ هنا نستخدم html بدل text
+            html: emailDesign
         });
         
+        console.log("تم إرسال الإيميل بنجاح! ✅"); // 🔍 تتبع 2
         res.status(201).json({ message: "تم التسجيل! تحقق من بريدك." });
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "فشل التسجيل" });
+        console.error("❌ خطأ كارثي في السيرفر:", error); // طباعة الخطأ في اللوج
+        res.status(500).json({ error: "فشل إرسال الإيميل، حاول مرة أخرى." });
     }
 });
 
