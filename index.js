@@ -64,7 +64,10 @@ const userSchema = new mongoose.Schema({
     role: { type: String, default: 'user' },
     isVerified: { type: Boolean, default: false },
     otp: String,
-    otpExpires: Date
+    otpExpires: Date,
+    phone: { type: String, unique: true, sparse: true }, // رقم الهاتف (اختياري حالياً)
+    phoneOtp: String,
+    isPhoneVerified: { type: Boolean, default: false }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -199,25 +202,25 @@ app.post('/api/auth/login', async (req, res) => {
 
             // إرسال الإيميل
             // تصميم الرسالة (HTML)
-        const emailDesign = `
-        <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
-            <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
-                <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
-            </div>
-            <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
-                <h2 style="color: #333;">مرحباً بك يا ${user.name}! 👋</h2>
-                <p style="color: #666; font-size: 16px; line-height: 1.5;">
-                    نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
-                </p>
-                <div style="margin: 30px 0;">
-                    <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
-                        ${otpCode}
-                    </span>
+            const emailDesign = `
+            <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
+                <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
                 </div>
-                <p style="color: #999; font-size: 14px;">⚠️ الرمز صالح لمدة 10 دقائق.</p>
+                <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
+                    <h2 style="color: #333;">مرحباً بك يا ${user.name}! 👋</h2>
+                    <p style="color: #666; font-size: 16px; line-height: 1.5;">
+                        نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
+                    </p>
+                    <div style="margin: 30px 0;">
+                        <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
+                            ${otpCode}
+                        </span>
+                    </div>
+                    <p style="color: #999; font-size: 14px;">⚠️ الرمز صالح لمدة 10 دقائق.</p>
+                </div>
             </div>
-        </div>
-        `;
+            `;
 
             await transporter.sendMail({
                 from: '"Filo Menu Support" <no-reply@filomenu.com>',
@@ -229,7 +232,9 @@ app.post('/api/auth/login', async (req, res) => {
             // إرجاع خطأ خاص يفهمه التطبيق
             return res.status(403).json({ error: "NOT_VERIFIED", message: "الحساب غير مفعل. تم إرسال رمز جديد." });
         }
-
+        if (!user.isPhoneVerified) {
+            return res.status(403).json({ error: "PHONE_NOT_VERIFIED" }); // تفعيل هاتف
+        }
         // 3. نجاح الدخول
         res.json({ message: "تم الدخول!", user: { name: user.name, email: user.email } });
 
@@ -237,6 +242,46 @@ app.post('/api/auth/login', async (req, res) => {
         console.error(error);
         res.status(500).json({ error: "خطأ سيرفر" });
     }
+});
+
+// طلب رمز تفعيل للهاتف
+app.post('/api/auth/phone/send', async (req, res) => {
+    const { phone } = req.body;
+    if (!phone) return res.status(400).json({ error: "رقم الهاتف مطلوب" });
+
+    const otpCode = Math.floor(1000 + Math.random() * 9000).toString(); // كود 4 أرقام
+
+    // 1. البحث عن المستخدم أو إنشاؤه مؤقتاً
+    let user = await User.findOne({ phone });
+    if (!user) {
+        // يمكننا إنشاء مستخدم جديد برقم الهاتف فقط
+        user = new User({ phone, isPhoneVerified: false }); 
+    }
+    
+    user.phoneOtp = otpCode;
+    await user.save();
+
+    // ⚠️ هنا المفروض نرسل SMS حقيقي (Twilio)
+    // للتجربة الآن: سنطبعه في الكونسول فقط
+    console.log(`📲 SMS to ${phone}: Your code is ${otpCode}`);
+
+    res.json({ message: "تم إرسال الرمز (تحقق من الكونسول للتجربة)" });
+});
+
+// التحقق من رمز الهاتف
+app.post('/api/auth/phone/verify', async (req, res) => {
+    const { phone, otp } = req.body;
+    const user = await User.findOne({ phone });
+
+    if (!user || user.phoneOtp !== otp) {
+        return res.status(400).json({ error: "الرمز غير صحيح" });
+    }
+
+    user.isPhoneVerified = true;
+    user.phoneOtp = undefined; // مسح الرمز
+    await user.save();
+
+    res.json({ message: "تم تفعيل رقم الهاتف بنجاح!", user });
 });
 
 // المنيو والطلبات
