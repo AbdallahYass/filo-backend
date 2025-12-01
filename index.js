@@ -27,19 +27,12 @@ app.use(limiter);
 
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 2525, // 👈 هذا هو المنفذ البديل المضمون
-    secure: false, // يجب أن تكون false لهذا المنفذ
+    port: 587, // 👈 ارجع للمنفذ الرسمي
+    secure: false, // false مع منفذ 587
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-    },
-    // إعدادات إضافية لتجنب التايم أوت
-    tls: {
-        ciphers: 'SSLv3',
-        rejectUnauthorized: false
-    },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000
+    }
 });
 
 // الحماية (API Key)
@@ -98,11 +91,42 @@ app.post('/api/auth/register', async (req, res) => {
         await newUser.save();
 
         // إرسال الإيميل الرسمي
+        // تصميم الرسالة (HTML)
+        const emailDesign = `
+        <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
+            <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
+            </div>
+            <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
+                <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
+                <p style="color: #666; font-size: 16px; line-height: 1.5;">
+                    نحن سعداء جداً بانضمامك إلى عائلة <strong>Filo Menu</strong>.<br>
+                    لتفعيل حسابك والبدء في طلب وجباتك المفضلة، يرجى استخدام الرمز أدناه:
+                </p>
+                
+                <div style="margin: 30px 0;">
+                    <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
+                        ${otpCode}
+                    </span>
+                </div>
+
+                <p style="color: #999; font-size: 14px;">
+                    ⚠️ هذا الرمز صالح لمدة 10 دقائق فقط.<br>
+                    إذا لم تطلب هذا الرمز، يرجى تجاهل هذه الرسالة.
+                </p>
+            </div>
+            <div style="text-align: center; margin-top: 20px; color: #888; font-size: 12px;">
+                &copy; 2025 Filo Menu. All rights reserved.
+            </div>
+        </div>
+        `;
+
+        // إرسال الإيميل
         await transporter.sendMail({
-            from: '"Filo Menu Support" <no-reply@filomenu.com>', // 👈 دومينك الرسمي
+            from: '"Filo Menu Team" <no-reply@filomenu.com>',
             to: email,
-            subject: 'رمز تفعيل حسابك - Filo Menu',
-            text: `مرحباً ${name}،\nرمز التفعيل الخاص بك هو: ${otpCode}\nينتهي الرمز خلال 10 دقائق.`
+            subject: '🔐 رمز تفعيل حسابك - Filo Menu',
+            html: emailDesign // 👈 لاحظ هنا نستخدم html بدل text
         });
         
         res.status(201).json({ message: "تم التسجيل! تحقق من بريدك." });
