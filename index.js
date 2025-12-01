@@ -205,7 +205,7 @@ app.post('/api/auth/login', async (req, res) => {
                 <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
             </div>
             <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
-                <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
+                <h2 style="color: #333;">مرحباً بك يا ${user.name}! 👋</h2>
                 <p style="color: #666; font-size: 16px; line-height: 1.5;">
                     نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
                 </p>
