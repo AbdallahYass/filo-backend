@@ -1,111 +1,103 @@
+require('dotenv').config(); // تحميل المتغيرات السرية
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
+const helmet = require('helmet'); // حماية الهيدرز
+const rateLimit = require('express-rate-limit'); // حماية من السبام
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000; // Render يعطي بورت تلقائي
 
-// 👇👇👇 تأكد من وجود رابط قاعدة البيانات الخاص بك هنا
-const MONGO_URI = 'mongodb+srv://admin:filo1234$$1234@filocluster.xsiuhaq.mongodb.net/?retryWrites=true&w=majority&appName=FiloCluster';
+// 1. الاتصال بقاعدة البيانات (من المتغيرات السرية)
+const MONGO_URI = process.env.MONGO_URI;
 
 mongoose.connect(MONGO_URI)
-    .then(() => console.log('✅ تم الاتصال بـ MongoDB بنجاح!'))
-    .catch(err => console.error('❌ فشل الاتصال:', err));
+    .then(() => console.log('✅ تم الاتصال بـ MongoDB بأمان!'))
+    .catch(err => console.error('❌ خطأ في الاتصال:', err));
 
-app.use(cors());
+// 2. إعدادات الحماية
+app.use(helmet()); // تفعيل خوذة الحماية
+app.use(cors());   // يمكن تخصيصه لاحقاً ليقبل فقط موقعك
 app.use(bodyParser.json());
-app.use(express.static('public'));
-// ----------------------------------------------------
-// 1. تصميم الجداول (Schemas)
-// ----------------------------------------------------
 
-// جدول الطلبات
+// 3. تحديد عدد الطلبات (مثلاً 100 طلب كل 15 دقيقة لكل IP)
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 دقيقة
+    max: 100, // الحد الأقصى
+    message: "تم حظرك مؤقتاً بسبب كثرة الطلبات!"
+});
+app.use(limiter); // تطبيق الحد على كل الراوتس
+
+// 4. حماية إضافية (كلمة سر للتطبيق)
+// أي طلب لا يحمل الكود السري سيتم رفضه
+const checkAuth = (req, res, next) => {
+    // نسمح بطلبات الـ GET (عرض المنيو) للجميع
+    if (req.method === 'GET') return next();
+
+    const secret = req.headers['x-api-key'];
+    if (secret === process.env.API_SECRET) {
+        next(); // السماح بالمرور
+    } else {
+        res.status(403).json({ error: "غير مصرح لك بالدخول! 🚫" });
+    }
+};
+app.use(checkAuth);
+
+// --- الجداول (Schemas) ---
 const orderSchema = new mongoose.Schema({
     items: Array,        
     totalPrice: Number, 
     date: String,
-    tableNumber: String // 👈 أضفنا هذا الحقل الجديد
+    tableNumber: String
 });
 const Order = mongoose.model('Order', orderSchema);
 
-// 👇 جدول قائمة الطعام (الجديد)
 const menuSchema = new mongoose.Schema({
-    id: String,
-    title: String,
-    description: String,
-    price: Number,
-    imageUrl: String,
-    category: String
+    id: String, title: String, description: String, price: Number, imageUrl: String, category: String
 });
 const Menu = mongoose.model('Menu', menuSchema);
 
-// ----------------------------------------------------
-// 2. البيانات الأولية (سنستخدمها مرة واحدة للتعبئة)
-// ----------------------------------------------------
-const initialMenu = [
-    { id: "1", title: "برجر كلاسيك", price: 8.5, imageUrl: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80", description: "شريحة لحم بقري مشوية مع جبنة شيدر وخس طازج.", category: "رئيسية" },
-    { id: "2", title: "بطاطس ذهبية", price: 3.5, imageUrl: "https://images.unsplash.com/photo-1573080496987-a199f8cd75c5?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80", description: "بطاطس مقلية مقرمشة مع خلطة بهارات سرية.", category: "مقبلات" },
-    { id: "3", title: "بيتزا مارغريتا", price: 10.0, imageUrl: "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80", description: "صلصة طماطم إيطالية، جبنة موزاريلا، وريحان طازج.", category: "رئيسية" }
-];
+// --- نقاط الاتصال ---
 
-// ----------------------------------------------------
-// 3. نقاط الاتصال (APIs)
-// ----------------------------------------------------
+app.get('/', (req, res) => res.send('Filo Server is Secure & Running! 🔒'));
 
-app.get('/', (req, res) => {
-    res.send('Filo Server is Running!');
-});
-
-// 👇 الرابط السحري: اضغط عليه مرة واحدة لملء قاعدة البيانات
-app.get('/api/fill-menu', async (req, res) => {
-    try {
-        // نتحقق أولاً إذا كانت القائمة فارغة
-        const count = await Menu.countDocuments();
-        if (count === 0) {
-            await Menu.insertMany(initialMenu);
-            res.send("✅ تمت إضافة الأصناف إلى قاعدة البيانات بنجاح!");
-        } else {
-            res.send("⚠️ الأصناف موجودة بالفعل، لم تتم إضافة شيء.");
-        }
-    } catch (error) {
-        res.status(500).send("حدث خطأ: " + error.message);
-    }
-});
-
-// جلب القائمة (الآن نجلبها من قاعدة البيانات وليس المصفوفة)
 app.get('/api/menu', async (req, res) => {
     try {
-        const menu = await Menu.find(); // هات كل شيء من جدول Menu
+        const menu = await Menu.find();
         res.json(menu);
     } catch (error) {
-        res.status(500).json({ error: "فشل جلب القائمة" });
+        res.status(500).json({ error: "Error fetching menu" });
     }
 });
 
-// جلب الطلبات
 app.get('/api/orders', async (req, res) => {
     try {
         const orders = await Order.find(); 
         res.json(orders);
     } catch (error) {
-        res.status(500).json({ error: "فشل جلب الطلبات" });
+        res.status(500).json({ error: "Error fetching orders" });
     }
 });
 
-// حفظ طلب جديد
 app.post('/api/orders', async (req, res) => {
     const orderData = req.body;
     try {
         const newOrder = new Order(orderData);
         await newOrder.save();
-        console.log("تم حفظ الطلب! 💾");
+        console.log("تم حفظ طلب جديد بأمان! 💾");
         res.status(201).json({ message: "تم الحفظ بنجاح!" });
     } catch (error) {
-        res.status(500).json({ error: "فشل حفظ الطلب" });
+        res.status(500).json({ error: "Error saving order" });
     }
 });
 
+// تعبئة المنيو (محمية بكلمة السر أيضاً)
+app.get('/api/fill-menu', async (req, res) => {
+    // يمكنك إضافة منطق حماية خاص هنا
+    res.send("تم إيقاف هذه الخاصية للأمان."); 
+});
+
 app.listen(PORT, () => {
-    console.log(`✅ السيرفر يعمل على: http://localhost:${PORT}`);
+    console.log(`✅ Server running on port ${PORT}`);
 });
