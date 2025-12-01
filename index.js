@@ -45,6 +45,10 @@ const checkAuth = (req, res, next) => {
     // if (req.method === 'GET') return next();
 
     const secret = req.headers['x-api-key'];
+    // 👇👇👇 أضف هذين السطرين هنا لنكشف السر
+    console.log("🔑 المفتاح القادم من التطبيق:", secret);
+    console.log("🔒 المفتاح المخزن في السيرفر:", process.env.API_SECRET);
+    // 👆👆👆
     if (secret === process.env.API_SECRET) {
         next();
     } else {
