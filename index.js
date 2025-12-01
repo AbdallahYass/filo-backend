@@ -24,7 +24,7 @@ app.use(bodyParser.json());
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
 
-// إعدادات Brevo باستخدام المنفذ البديل 2525
+// 3. إعداد مرسل الإيميلات (Brevo SMTP - Port 587)
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 2525, // 👈 هذا هو الحل! غيرنا 587 إلى 2525
@@ -92,12 +92,12 @@ app.post('/api/auth/register', async (req, res) => {
         const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 دقائق
 
         if (user) {
-            // 🛑 إذا كان المستخدم موجوداً ومفعلاً
+            // 🛑 الحالة أ: المستخدم موجود ومفعل
             if (user.isVerified) {
                 return res.status(400).json({ error: "البريد الإلكتروني مستخدم بالفعل، حاول تسجيل الدخول." });
             } 
             
-            // ♻️ إذا كان موجوداً ولكنه غير مفعل -> نحدث بياناته ونرسل الرمز
+            // ♻️ الحالة ب: المستخدم موجود ولكنه غير مفعل (خرج قبل التفعيل)
             user.name = name;
             user.password = password;
             user.otp = otpCode;
@@ -106,11 +106,9 @@ app.post('/api/auth/register', async (req, res) => {
             console.log(`♻️ تم تحديث حساب غير مفعل: ${email}`);
 
         } else {
-            // 🆕 مستخدم جديد كلياً
+            // 🆕 الحالة ج: مستخدم جديد كلياً
             user = new User({
-                email,
-                password,
-                name,
+                email, password, name,
                 isVerified: false,
                 otp: otpCode,
                 otpExpires: otpExpiry
@@ -180,19 +178,63 @@ app.post('/api/auth/verify', async (req, res) => {
     }
 });
 
-// تسجيل الدخول
+// تسجيل الدخول (مع إعادة إرسال الرمز للحسابات غير المفعلة)
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email });
+        
+        // 1. التحقق من البيانات
         if (!user || user.password !== password) {
-            return res.status(401).json({ error: "بيانات خطأ" });
+            return res.status(401).json({ error: "البريد الإلكتروني أو كلمة المرور خطأ" });
         }
+
+        // 2. التحقق من التفعيل
         if (!user.isVerified) {
-            return res.status(403).json({ error: "يرجى تفعيل حسابك أولاً" });
+            // إعادة إرسال الرمز
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            user.otp = otpCode;
+            user.otpExpires = Date.now() + 10 * 60 * 1000;
+            await user.save();
+
+            // إرسال الإيميل
+            // تصميم الرسالة (HTML)
+        const emailDesign = `
+        <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
+            <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+                <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
+            </div>
+            <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
+                <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
+                <p style="color: #666; font-size: 16px; line-height: 1.5;">
+                    نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
+                </p>
+                <div style="margin: 30px 0;">
+                    <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
+                        ${otpCode}
+                    </span>
+                </div>
+                <p style="color: #999; font-size: 14px;">⚠️ الرمز صالح لمدة 10 دقائق.</p>
+            </div>
+        </div>
+        `;
+
+            await transporter.sendMail({
+                from: '"Filo Menu Support" <no-reply@filomenu.com>',
+                to: email,
+                subject: '⚠️ تفعيل حسابك مطلوب',
+                html: emailDesign
+            });
+
+            // إرجاع خطأ خاص يفهمه التطبيق
+            return res.status(403).json({ error: "NOT_VERIFIED", message: "الحساب غير مفعل. تم إرسال رمز جديد." });
         }
+
+        // 3. نجاح الدخول
         res.json({ message: "تم الدخول!", user: { name: user.name, email: user.email } });
+
     } catch (error) {
+        console.error(error);
         res.status(500).json({ error: "خطأ سيرفر" });
     }
 });
