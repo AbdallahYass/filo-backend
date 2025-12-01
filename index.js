@@ -27,12 +27,16 @@ app.use(limiter);
 // إعداد مرسل الإيميلات (Brevo SMTP)
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 587,
-    secure: false, 
+    port: 465, // 👈 غيرنا المنفذ من 587 إلى 465
+    secure: true, // 👈 غيرنا هذه إلى true (لأن 465 يتطلب SSL)
     auth: {
-        user: process.env.EMAIL_USER, 
-        pass: process.env.EMAIL_PASS 
-    }
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    },
+    // إعدادات إضافية لزيادة وقت الانتظار (في حال كان الاتصال بطيئاً)
+    connectionTimeout: 10000, // 10 ثواني
+    greetingTimeout: 10000,
+    socketTimeout: 10000
 });
 
 // الحماية (API Key)
