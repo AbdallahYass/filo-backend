@@ -27,16 +27,19 @@ app.use(limiter);
 
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 465, // 👈 غيرنا المنفذ من 587 إلى 465
-    secure: true, // 👈 غيرنا هذه إلى true (لأن 465 يتطلب SSL)
+    port: 2525, // 👈 هذا هو المنفذ البديل المضمون
+    secure: false, // يجب أن تكون false لهذا المنفذ
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
-    // إعدادات إضافية لزيادة وقت الانتظار (في حال كان الاتصال بطيئاً)
-    connectionTimeout: 10000, // 10 ثواني
-    greetingTimeout: 10000,
-    socketTimeout: 10000
+    // إعدادات إضافية لتجنب التايم أوت
+    tls: {
+        ciphers: 'SSLv3',
+        rejectUnauthorized: false
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000
 });
 
 // الحماية (API Key)
