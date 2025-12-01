@@ -24,7 +24,7 @@ app.use(bodyParser.json());
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
 
-// إعداد مرسل الإيميلات (Brevo SMTP)
+
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 465, // 👈 غيرنا المنفذ من 587 إلى 465
