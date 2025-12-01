@@ -5,25 +5,24 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-// const mongoSanitize = require('express-mongo-sanitize'); // معطل مؤقتاً
-const Joi = require('joi');
-const nodemailer = require('nodemailer'); // 📧
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 
+// 1. الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
     .then(() => console.log('✅ Connected to MongoDB!'))
     .catch(err => console.error('❌ Connection Error:', err));
 
+// 2. إعدادات الحماية والـ Middleware
 app.use(helmet());
 app.use(cors());
 app.use(bodyParser.json());
 
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
-
 
 // إعدادات Brevo باستخدام المنفذ البديل 2525
 const transporter = nodemailer.createTransport({
@@ -44,7 +43,7 @@ const transporter = nodemailer.createTransport({
     socketTimeout: 20000
 });
 
-// الحماية (API Key)
+// 4. التحقق من مفتاح API
 const checkAuth = (req, res, next) => {
     if (req.path === '/') return next();
     const secret = req.headers['x-api-key'];
@@ -56,7 +55,8 @@ const checkAuth = (req, res, next) => {
 };
 app.use('/api', checkAuth);
 
-// --- الجداول ---
+
+// --- الجداول (Schemas) ---
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
@@ -78,26 +78,46 @@ const menuSchema = new mongoose.Schema({
 });
 const Menu = mongoose.model('Menu', menuSchema);
 
-// --- APIs ---
 
-app.get('/', (req, res) => res.send('Filo Server is Live!'));
+// --- نقاط الاتصال (APIs) ---
 
-// تسجيل حساب (مع إرسال إيميل رسمي)
+app.get('/', (req, res) => res.send('Filo Server is Live! 🚀'));
+
+// تسجيل حساب جديد (مع معالجة الحسابات غير المفعلة)
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, name } = req.body;
     try {
-        const existingUser = await User.findOne({ email });
-        if (existingUser) return res.status(400).json({ error: "البريد مستخدم مسبقاً" });
-
+        let user = await User.findOne({ email });
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 دقائق
 
-        const newUser = new User({
-            email, password, name,
-            isVerified: false,
-            otp: otpCode,
-            otpExpires: Date.now() + 10 * 60 * 1000
-        });
-        await newUser.save();
+        if (user) {
+            // 🛑 إذا كان المستخدم موجوداً ومفعلاً
+            if (user.isVerified) {
+                return res.status(400).json({ error: "البريد الإلكتروني مستخدم بالفعل، حاول تسجيل الدخول." });
+            } 
+            
+            // ♻️ إذا كان موجوداً ولكنه غير مفعل -> نحدث بياناته ونرسل الرمز
+            user.name = name;
+            user.password = password;
+            user.otp = otpCode;
+            user.otpExpires = otpExpiry;
+            await user.save();
+            console.log(`♻️ تم تحديث حساب غير مفعل: ${email}`);
+
+        } else {
+            // 🆕 مستخدم جديد كلياً
+            user = new User({
+                email,
+                password,
+                name,
+                isVerified: false,
+                otp: otpCode,
+                otpExpires: otpExpiry
+            });
+            await user.save();
+            console.log(`🆕 تم إنشاء حساب جديد: ${email}`);
+        }
 
         // تصميم الرسالة (HTML)
         const emailDesign = `
@@ -108,31 +128,20 @@ app.post('/api/auth/register', async (req, res) => {
             <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
                 <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
                 <p style="color: #666; font-size: 16px; line-height: 1.5;">
-                    نحن سعداء جداً بانضمامك إلى عائلة <strong>Filo Menu</strong>.<br>
-                    لتفعيل حسابك والبدء في طلب وجباتك المفضلة، يرجى استخدام الرمز أدناه:
+                    نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
                 </p>
-                
                 <div style="margin: 30px 0;">
                     <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
                         ${otpCode}
                     </span>
                 </div>
-
-                <p style="color: #999; font-size: 14px;">
-                    ⚠️ هذا الرمز صالح لمدة 10 دقائق فقط.<br>
-                    إذا لم تطلب هذا الرمز، يرجى تجاهل هذه الرسالة.
-                </p>
-            </div>
-            <div style="text-align: center; margin-top: 20px; color: #888; font-size: 12px;">
-                &copy; 2025 Filo Menu. All rights reserved.
+                <p style="color: #999; font-size: 14px;">⚠️ الرمز صالح لمدة 10 دقائق.</p>
             </div>
         </div>
         `;
 
-        // إرسال الإيميل
-        console.log("جاري محاولة إرسال الإيميل إلى:", email); // 🔍 تتبع 1
+        console.log("جاري محاولة إرسال الإيميل إلى:", email);
 
-        // إرسال الإيميل
         await transporter.sendMail({
             from: '"Filo Menu Support" <no-reply@filomenu.com>',
             to: email,
@@ -140,12 +149,12 @@ app.post('/api/auth/register', async (req, res) => {
             html: emailDesign
         });
         
-        console.log("تم إرسال الإيميل بنجاح! ✅"); // 🔍 تتبع 2
-        res.status(201).json({ message: "تم التسجيل! تحقق من بريدك." });
+        console.log("تم إرسال الإيميل بنجاح! ✅");
+        res.status(201).json({ message: "تم إرسال الرمز! تحقق من بريدك." });
 
     } catch (error) {
-        console.error("❌ خطأ كارثي في السيرفر:", error); // طباعة الخطأ في اللوج
-        res.status(500).json({ error: "فشل إرسال الإيميل، حاول مرة أخرى." });
+        console.error("Register Error:", error);
+        res.status(500).json({ error: "فشل التسجيل أو إرسال الإيميل." });
     }
 });
 
@@ -188,20 +197,34 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// المنيو والطلبات (كما هي)
+// المنيو والطلبات
 app.get('/api/menu', async (req, res) => {
-    const menu = await Menu.find();
-    res.json(menu);
-});
-app.get('/api/orders', async (req, res) => {
-    const orders = await Order.find();
-    res.json(orders);
-});
-app.post('/api/orders', async (req, res) => {
-    const orderData = req.body;
-    const newOrder = new Order(orderData);
-    await newOrder.save();
-    res.status(201).json({ message: "Saved!" });
+    try {
+        const menu = await Menu.find();
+        res.json(menu);
+    } catch (error) {
+        res.status(500).json({ error: "Error fetching menu" });
+    }
 });
 
-app.listen(PORT, () => console.log(`Running on ${PORT}`));
+app.get('/api/orders', async (req, res) => {
+    try {
+        const orders = await Order.find();
+        res.json(orders);
+    } catch (error) {
+        res.status(500).json({ error: "Error fetching orders" });
+    }
+});
+
+app.post('/api/orders', async (req, res) => {
+    const orderData = req.body;
+    try {
+        const newOrder = new Order(orderData);
+        await newOrder.save();
+        res.status(201).json({ message: "Saved!" });
+    } catch (error) {
+        res.status(500).json({ error: "Error saving order" });
+    }
+});
+
+app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
