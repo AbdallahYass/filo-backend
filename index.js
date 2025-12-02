@@ -24,23 +24,19 @@ app.use(bodyParser.json());
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 app.use(limiter);
 
-// 3. إعداد مرسل الإيميلات (Brevo SMTP - Port 587)
+// 3. إعداد مرسل الإيميلات (Brevo SMTP)
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 2525, // 👈 هذا هو الحل! غيرنا 587 إلى 2525
-    secure: false, // هذا المنفذ لا يستخدم SSL المباشر
+    port: 587, // المنفذ القياسي لـ Brevo
+    secure: false, 
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
-    // إعدادات لتجاوز مشاكل التشفير والشبكة
     tls: {
         ciphers: 'SSLv3',
         rejectUnauthorized: false
-    },
-    connectionTimeout: 20000, // زدنا الوقت لـ 20 ثانية
-    greetingTimeout: 20000,
-    socketTimeout: 20000
+    }
 });
 
 // 4. التحقق من مفتاح API
@@ -62,10 +58,12 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true },
     name: String,
     role: { type: String, default: 'user' },
+    // بيانات الإيميل
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
-    phone: { type: String, unique: true, sparse: true }, // رقم الهاتف (اختياري حالياً)
+    // بيانات الهاتف
+    phone: { type: String },
     phoneOtp: String,
     isPhoneVerified: { type: Boolean, default: false }
 });
@@ -86,30 +84,26 @@ const Menu = mongoose.model('Menu', menuSchema);
 
 app.get('/', (req, res) => res.send('Filo Server is Live! 🚀'));
 
-// تسجيل حساب جديد (مع معالجة الحسابات غير المفعلة)
+// 1️⃣ تسجيل حساب جديد
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, name } = req.body;
     try {
         let user = await User.findOne({ email });
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000; // 10 دقائق
+        const otpExpiry = Date.now() + 10 * 60 * 1000;
 
         if (user) {
-            // 🛑 الحالة أ: المستخدم موجود ومفعل
             if (user.isVerified) {
-                return res.status(400).json({ error: "البريد الإلكتروني مستخدم بالفعل، حاول تسجيل الدخول." });
-            } 
-            
-            // ♻️ الحالة ب: المستخدم موجود ولكنه غير مفعل (خرج قبل التفعيل)
+                return res.status(400).json({ error: "البريد الإلكتروني مستخدم بالفعل." });
+            }
+            // تحديث حساب غير مفعل
             user.name = name;
             user.password = password;
             user.otp = otpCode;
             user.otpExpires = otpExpiry;
             await user.save();
-            console.log(`♻️ تم تحديث حساب غير مفعل: ${email}`);
-
         } else {
-            // 🆕 الحالة ج: مستخدم جديد كلياً
+            // إنشاء جديد
             user = new User({
                 email, password, name,
                 isVerified: false,
@@ -117,10 +111,9 @@ app.post('/api/auth/register', async (req, res) => {
                 otpExpires: otpExpiry
             });
             await user.save();
-            console.log(`🆕 تم إنشاء حساب جديد: ${email}`);
         }
 
-        // تصميم الرسالة (HTML)
+        // تصميم الرسالة
         const emailDesign = `
         <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
             <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -129,7 +122,7 @@ app.post('/api/auth/register', async (req, res) => {
             <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
                 <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
                 <p style="color: #666; font-size: 16px; line-height: 1.5;">
-                    نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
+                    أهلاً بك في عائلة Filo. لتفعيل حسابك، استخدم الرمز التالي:
                 </p>
                 <div style="margin: 30px 0;">
                     <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
@@ -141,31 +134,27 @@ app.post('/api/auth/register', async (req, res) => {
         </div>
         `;
 
-        console.log("جاري محاولة إرسال الإيميل إلى:", email);
-
         await transporter.sendMail({
             from: '"Filo Menu Support" <no-reply@filomenu.com>',
             to: email,
-            subject: '🔐 رمز تفعيل حسابك - Filo Menu',
+            subject: '🔐 رمز تفعيل حسابك',
             html: emailDesign
         });
         
-        console.log("تم إرسال الإيميل بنجاح! ✅");
-        res.status(201).json({ message: "تم إرسال الرمز! تحقق من بريدك." });
+        res.status(201).json({ message: "تم إرسال الرمز!" });
 
     } catch (error) {
         console.error("Register Error:", error);
-        res.status(500).json({ error: "فشل التسجيل أو إرسال الإيميل." });
+        res.status(500).json({ error: "فشل التسجيل" });
     }
 });
 
-// تفعيل الحساب
+// 2️⃣ تفعيل الإيميل
 app.post('/api/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ error: "المستخدم غير موجود" });
-        if (user.isVerified) return res.status(400).json({ error: "الحساب مفعل مسبقاً" });
         if (user.otp !== otp || user.otpExpires < Date.now()) {
             return res.status(400).json({ error: "الرمز غير صحيح أو منتهي" });
         }
@@ -175,33 +164,71 @@ app.post('/api/auth/verify', async (req, res) => {
         user.otpExpires = undefined;
         await user.save();
 
-        res.status(200).json({ message: "تم التفعيل!" });
+        res.status(200).json({ message: "تم تفعيل الإيميل!" });
     } catch (error) {
         res.status(500).json({ error: "خطأ في التفعيل" });
     }
 });
 
-// تسجيل الدخول (مع إعادة إرسال الرمز للحسابات غير المفعلة)
+// 3️⃣ طلب رمز الهاتف (تحديث للمستخدم الموجود)
+app.post('/api/auth/phone/send', async (req, res) => {
+    const { email, phone } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+        const smsCode = Math.floor(1000 + Math.random() * 9000).toString();
+        
+        user.phone = phone;
+        user.phoneOtp = smsCode;
+        await user.save();
+
+        console.log(`📲 SMS SIMULATION -> To: ${phone} | Code: ${smsCode}`);
+        res.json({ message: "تم إرسال الرمز (راجع الكونسول)" });
+    } catch (error) {
+        res.status(500).json({ error: "فشل إرسال الرمز" });
+    }
+});
+
+// 4️⃣ تفعيل الهاتف
+app.post('/api/auth/phone/verify', async (req, res) => {
+    const { email, otp } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+        if (user.phoneOtp !== otp) {
+            return res.status(400).json({ error: "رمز الهاتف خطأ" });
+        }
+
+        user.isPhoneVerified = true;
+        user.phoneOtp = undefined;
+        await user.save();
+
+        res.json({ message: "تم تفعيل الهاتف!" });
+    } catch (error) {
+        res.status(500).json({ error: "فشل التفعيل" });
+    }
+});
+
+// 5️⃣ تسجيل الدخول (مع التصحيح والتصميم الفخم)
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email });
         
-        // 1. التحقق من البيانات
         if (!user || user.password !== password) {
-            return res.status(401).json({ error: "البريد الإلكتروني أو كلمة المرور خطأ" });
+            return res.status(401).json({ error: "البيانات غير صحيحة" });
         }
 
-        // 2. التحقق من التفعيل
+        // فحص تفعيل الإيميل
         if (!user.isVerified) {
-            // إعادة إرسال الرمز
             const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
             user.otp = otpCode;
             user.otpExpires = Date.now() + 10 * 60 * 1000;
             await user.save();
 
-            // إرسال الإيميل
-            // تصميم الرسالة (HTML)
+            // ✅ تم التصحيح: استخدام user.name
             const emailDesign = `
             <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
                 <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -210,7 +237,7 @@ app.post('/api/auth/login', async (req, res) => {
                 <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
                     <h2 style="color: #333;">مرحباً بك يا ${user.name}! 👋</h2>
                     <p style="color: #666; font-size: 16px; line-height: 1.5;">
-                        نحن سعداء بانضمامك. لتفعيل حسابك، يرجى استخدام الرمز أدناه:
+                        حاولت تسجيل الدخول والحساب غير مفعل. رمز التفعيل الجديد هو:
                     </p>
                     <div style="margin: 30px 0;">
                         <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
@@ -229,13 +256,14 @@ app.post('/api/auth/login', async (req, res) => {
                 html: emailDesign
             });
 
-            // إرجاع خطأ خاص يفهمه التطبيق
-            return res.status(403).json({ error: "NOT_VERIFIED", message: "الحساب غير مفعل. تم إرسال رمز جديد." });
+            return res.status(403).json({ error: "NOT_VERIFIED", message: "الحساب غير مفعل." });
         }
+
+        // فحص تفعيل الهاتف
         if (!user.isPhoneVerified) {
-            return res.status(403).json({ error: "PHONE_NOT_VERIFIED" }); // تفعيل هاتف
+            return res.status(403).json({ error: "PHONE_NOT_VERIFIED", message: "رقم الهاتف غير مفعل" });
         }
-        // 3. نجاح الدخول
+
         res.json({ message: "تم الدخول!", user: { name: user.name, email: user.email } });
 
     } catch (error) {
@@ -244,74 +272,19 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// طلب رمز تفعيل للهاتف
-app.post('/api/auth/phone/send', async (req, res) => {
-    const { phone } = req.body;
-    if (!phone) return res.status(400).json({ error: "رقم الهاتف مطلوب" });
-
-    const otpCode = Math.floor(1000 + Math.random() * 9000).toString(); // كود 4 أرقام
-
-    // 1. البحث عن المستخدم أو إنشاؤه مؤقتاً
-    let user = await User.findOne({ phone });
-    if (!user) {
-        // يمكننا إنشاء مستخدم جديد برقم الهاتف فقط
-        user = new User({ phone, isPhoneVerified: false }); 
-    }
-    
-    user.phoneOtp = otpCode;
-    await user.save();
-
-    // ⚠️ هنا المفروض نرسل SMS حقيقي (Twilio)
-    // للتجربة الآن: سنطبعه في الكونسول فقط
-    console.log(`📲 SMS to ${phone}: Your code is ${otpCode}`);
-
-    res.json({ message: "تم إرسال الرمز (تحقق من الكونسول للتجربة)" });
-});
-
-// التحقق من رمز الهاتف
-app.post('/api/auth/phone/verify', async (req, res) => {
-    const { phone, otp } = req.body;
-    const user = await User.findOne({ phone });
-
-    if (!user || user.phoneOtp !== otp) {
-        return res.status(400).json({ error: "الرمز غير صحيح" });
-    }
-
-    user.isPhoneVerified = true;
-    user.phoneOtp = undefined; // مسح الرمز
-    await user.save();
-
-    res.json({ message: "تم تفعيل رقم الهاتف بنجاح!", user });
-});
-
-// المنيو والطلبات
+// --- المنيو والطلبات ---
 app.get('/api/menu', async (req, res) => {
-    try {
-        const menu = await Menu.find();
-        res.json(menu);
-    } catch (error) {
-        res.status(500).json({ error: "Error fetching menu" });
-    }
+    const menu = await Menu.find();
+    res.json(menu);
 });
-
 app.get('/api/orders', async (req, res) => {
-    try {
-        const orders = await Order.find();
-        res.json(orders);
-    } catch (error) {
-        res.status(500).json({ error: "Error fetching orders" });
-    }
+    const orders = await Order.find();
+    res.json(orders);
 });
-
 app.post('/api/orders', async (req, res) => {
-    const orderData = req.body;
-    try {
-        const newOrder = new Order(orderData);
-        await newOrder.save();
-        res.status(201).json({ message: "Saved!" });
-    } catch (error) {
-        res.status(500).json({ error: "Error saving order" });
-    }
+    const newOrder = new Order(req.body);
+    await newOrder.save();
+    res.status(201).json({ message: "Saved!" });
 });
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
