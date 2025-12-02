@@ -27,7 +27,7 @@ app.use(limiter);
 // 3. إعداد مرسل الإيميلات (Brevo SMTP)
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 587, // المنفذ القياسي لـ Brevo
+    port: 2025, // المنفذ القياسي لـ Brevo
     secure: false, 
     auth: {
         user: process.env.EMAIL_USER,
