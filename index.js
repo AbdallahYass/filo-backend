@@ -150,22 +150,48 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // 2️⃣ تفعيل الإيميل
+// 2️⃣ تفعيل الإيميل (مع طباعة السبب للمساعدة)
 app.post('/api/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ error: "المستخدم غير موجود" });
-        if (user.otp !== otp || user.otpExpires < Date.now()) {
-            return res.status(400).json({ error: "الرمز غير صحيح أو منتهي" });
+
+        // 👇👇👇 طباعة البيانات لكشف المشكلة في اللوج
+        console.log("--- عملية التحقق ---");
+        console.log(`📧 الإيميل: ${email}`);
+        console.log(`📥 الرمز القادم من التطبيق: '${otp}'`);
+        console.log(`💾 الرمز المخزن في الداتا: '${user.otp}'`);
+        console.log(`⏰ الوقت الحالي: ${Date.now()}`);
+        console.log(`⌛ وقت انتهاء الرمز: ${new Date(user.otpExpires).getTime()}`);
+
+        // تحويل القيم لنصوص وتنظيف الفراغات لضمان المطابقة
+        const inputOtp = String(otp).trim();
+        const storedOtp = String(user.otp).trim();
+
+        // 1. فحص التطابق
+        if (storedOtp !== inputOtp) {
+            console.log("❌ النتيجة: الرموز غير متطابقة!");
+            return res.status(400).json({ error: "الرمز غير صحيح (تأكد من آخر إيميل وصلك)" });
         }
 
+        // 2. فحص الوقت
+        if (user.otpExpires < Date.now()) {
+            console.log("❌ النتيجة: الرمز منتهي الصلاحية!");
+            return res.status(400).json({ error: "انتهت صلاحية الرمز، حاول التسجيل مجدداً" });
+        }
+
+        // نجاح
         user.isVerified = true;
         user.otp = undefined;
         user.otpExpires = undefined;
         await user.save();
 
+        console.log("✅ النتيجة: تم التفعيل بنجاح!");
         res.status(200).json({ message: "تم تفعيل الإيميل!" });
+
     } catch (error) {
+        console.error("Verify Error:", error);
         res.status(500).json({ error: "خطأ في التفعيل" });
     }
 });
