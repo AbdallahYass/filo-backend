@@ -86,18 +86,13 @@ const productSchema = new mongoose.Schema({
 });
 const Product = mongoose.model('Product', productSchema);
 
-// 3. جدول الطلبات (مع الإصلاح الخاص بـ AdminJS)
-// أولاً: Schema فرعية للعناصر
-const OrderItemSchema = new mongoose.Schema({
-    product: { type: mongoose.Types.ObjectId, ref: 'Product' },
-    quantity: { type: Number },
-    price: { type: Number }
-});
-
-// ثانياً: Schema الطلب الرئيسي
+// 3. جدول الطلبات (التعديل النهائي لمنع الانهيار)
 const OrderSchema = new mongoose.Schema({
-    customer: { type: mongoose.Types.ObjectId, ref: 'User' }, // تم تعديلها لتربط مع User
-    items: [OrderItemSchema], // ✅ هنا الحل الصحيح
+    customer: { type: mongoose.Types.ObjectId, ref: 'User' },
+    
+    // ✅✅✅ التعديل هنا: استخدام Mixed لمنع AdminJS من الانهيار ✅✅✅
+    items: { type: [mongoose.Schema.Types.Mixed] }, 
+    
     totalPrice: Number,
     status: { type: String, default: 'pending' },
     deliveryAddress: String,
@@ -114,27 +109,30 @@ app.use(session({
     saveUninitialized: false,
     store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
     cookie: {
-        secure: true, // تأكد من أن موقعك HTTPS (وهو كذلك على Render)
+        secure: true, 
         maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
 // --- إعداد لوحة التحكم (AdminJS) ---
-// يجب أن يكون داخل دالة async لضمان الترتيب
 const startAdmin = async () => {
-    const admin = new AdminJS({
-        databases: [mongoose],
-        rootPath: '/admin',
-        branding: {
-            companyName: 'Filo Dashboard',
-            logo: 'https://cdn-icons-png.flaticon.com/512/3081/3081367.png',
-            withMadeWithLove: false,
-        },
-    });
+    try {
+        const admin = new AdminJS({
+            databases: [mongoose],
+            rootPath: '/admin',
+            branding: {
+                companyName: 'Filo Dashboard',
+                logo: 'https://cdn-icons-png.flaticon.com/512/3081/3081367.png',
+                withMadeWithLove: false,
+            },
+        });
 
-    const adminRouter = AdminJSExpress.buildRouter(admin);
-    app.use(admin.options.rootPath, adminRouter);
-    console.log('👨‍💼 AdminJS initialized at /admin');
+        const adminRouter = AdminJSExpress.buildRouter(admin);
+        app.use(admin.options.rootPath, adminRouter);
+        console.log('👨‍💼 AdminJS initialized at /admin');
+    } catch (error) {
+        console.error("❌ AdminJS failed to start:", error);
+    }
 };
 startAdmin();
 
