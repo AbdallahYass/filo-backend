@@ -7,17 +7,23 @@ const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
-const bcrypt = require('bcryptjs'); // مكتبة التشفير
+const bcrypt = require('bcryptjs');
+const session = require('express-session');
+const MongoStore = require('connect-mongo').default || require('connect-mongo');
+
+// AdminJS Imports
 const AdminJS = require('adminjs');
 const AdminJSExpress = require('@adminjs/express');
 const AdminJSMongoose = require('@adminjs/mongoose');
 
-// --- إعدادات التطبيق والسيرفر ---
-// ... (الكود السابق كما هو)
-
+// --- إعدادات التطبيق ---
 const app = express();
 const server = http.createServer(app);
-app.set('trust proxy', 1); 
+const PORT = process.env.PORT || 3000;
+
+app.set('trust proxy', 1);
+
+// --- Socket.io ---
 const io = new Server(server, {
     cors: {
         origin: "*",
@@ -25,11 +31,20 @@ const io = new Server(server, {
     }
 });
 
-// ... (باقي الكود كما هو تماماً)
+// --- Middleware ---
+app.use(helmet());
+app.use(cors());
+app.use(express.json());
 
-const PORT = process.env.PORT || 3000;
+// Rate Limiting
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    message: "Too many requests from this IP, please try again later."
+});
+app.use('/api', apiLimiter);
 
-// 1. الاتصال بقاعدة البيانات (معالجة الأخطاء)
+// --- قاعدة البيانات (MongoDB) ---
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB Connected Securely'))
     .catch(err => console.error('❌ DB Connection Error:', err));
@@ -38,113 +53,93 @@ mongoose.connect(process.env.MONGO_URI)
 // تسجيل المودلز في AdminJS
 AdminJS.registerAdapter(AdminJSMongoose);
 
-// جدول المستخدمين (زبون، سائق، أدمن)
+// 1. جدول المستخدمين
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true }, // سيتم تخزينها مشفرة
+    password: { type: String, required: true },
     name: String,
     role: { 
         type: String, 
         enum: ['user', 'driver', 'admin', 'owner'], 
         default: 'user' 
     },
-    // التحقق
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
-    // الهاتف
     phone: String,
     phoneOtp: String,
     isPhoneVerified: { type: Boolean, default: false },
-    // الموقع (للسائقين)
     location: { lat: Number, lng: Number },
-    fcmToken: String // لإرسال الإشعارات للموبايل مستقبلاً
+    fcmToken: String
 });
 const User = mongoose.model('User', userSchema);
 
-// جدول المنتجات
+// 2. جدول المنتجات
 const productSchema = new mongoose.Schema({
     title: { type: String, required: true },
     description: String,
     price: { type: Number, required: true },
     image: String,
     category: String,
-    vendorId: String, // لربط المنتج بالمطعم
+    vendorId: String,
     isAvailable: { type: Boolean, default: true }
 });
 const Product = mongoose.model('Product', productSchema);
 
-// 1. أولاً: عرف شكل البيانات للعنصر الواحد (Item)
+// 3. جدول الطلبات (مع الإصلاح الخاص بـ AdminJS)
+// أولاً: Schema فرعية للعناصر
 const OrderItemSchema = new mongoose.Schema({
-  product: { type: mongoose.Types.ObjectId, ref: 'Product' }, // مثال
-  quantity: { type: Number },
-  price: { type: Number }
+    product: { type: mongoose.Types.ObjectId, ref: 'Product' },
+    quantity: { type: Number },
+    price: { type: Number }
 });
 
-// 2. ثانياً: استخدمها داخل الموديل الرئيسي للطلب
+// ثانياً: Schema الطلب الرئيسي
 const OrderSchema = new mongoose.Schema({
-  customer: { type: mongoose.Types.ObjectId, ref: 'Customer' },
-  
-  // ✅ الحل: ضع السكيما الفرعية هنا بدلاً من []
-  items: [OrderItemSchema], 
-  
-  totalPrice: Number,
-  status: String,
-  // ... باقي الحقول
+    customer: { type: mongoose.Types.ObjectId, ref: 'User' }, // تم تعديلها لتربط مع User
+    items: [OrderItemSchema], // ✅ هنا الحل الصحيح
+    totalPrice: Number,
+    status: { type: String, default: 'pending' },
+    deliveryAddress: String,
+    driver: { type: mongoose.Types.ObjectId, ref: 'User' },
+    createdAt: { type: Date, default: Date.now }
 });
+const Order = mongoose.model('Order', OrderSchema);
 
-module.exports = mongoose.model('Order', OrderSchema);
 
-// ... (بعد الـ require في الأعلى)
-const session = require('express-session');
-const MongoStore = require('connect-mongo').default || require('connect-mongo');
-// ... (بعد app.set trust proxy مباشرة)
-console.log("DEBUG MONGO STORE:", MongoStore); // 👈 أضف هذا السطر
-console.log("Type of MongoStore:", typeof MongoStore); // 👈 وهذا السطر
-// 👇 أضف إعدادات الجلسة هنا 👇
+// --- إعدادات الجلسة (Session) ---
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'filo_secure_key',
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
-  cookie: {
-    secure: true, // ضروري عشان Render (https)
-    maxAge: 24 * 60 * 60 * 1000 // يوم واحد
-  }
+    secret: process.env.SESSION_SECRET || 'filo_secure_key',
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+    cookie: {
+        secure: true, // تأكد من أن موقعك HTTPS (وهو كذلك على Render)
+        maxAge: 24 * 60 * 60 * 1000
+    }
 }));
 
 // --- إعداد لوحة التحكم (AdminJS) ---
+// يجب أن يكون داخل دالة async لضمان الترتيب
 const startAdmin = async () => {
     const admin = new AdminJS({
-        databases: [mongoose], // يقرأ كل الجداول تلقائياً
+        databases: [mongoose],
         rootPath: '/admin',
         branding: {
             companyName: 'Filo Dashboard',
             logo: 'https://cdn-icons-png.flaticon.com/512/3081/3081367.png',
             withMadeWithLove: false,
         },
-        // 👇👇👇 تم حذف قسم dashboard من هنا عشان يشتغل الافتراضي 👇👇👇
     });
-    
+
     const adminRouter = AdminJSExpress.buildRouter(admin);
     app.use(admin.options.rootPath, adminRouter);
+    console.log('👨‍💼 AdminJS initialized at /admin');
 };
 startAdmin();
 
-// --- Middleware (طبقات الحماية) ---
-app.use(helmet()); // إخفاء هوية السيرفر
-app.use(cors());   // السماح بالاتصال الخارجي
-app.use(express.json()); // قراءة بيانات JSON
 
-// تحديد عدد الطلبات (Rate Limiting) لمنع الهجمات
-const apiLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 دقيقة
-    max: 300, // الحد الأقصى للطلبات
-    message: "Too many requests from this IP, please try again later."
-});
-app.use('/api', apiLimiter);
-
-// إعداد الإيميل (Brevo)
+// --- إعداد الإيميل ---
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 587,
@@ -155,24 +150,19 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// --- Socket.io (نظام التوصيل الحي) ---
+// --- Socket.io Logic ---
 io.on('connection', (socket) => {
     console.log(`⚡ New Connection: ${socket.id}`);
 
-    // انضمام السائق لغرفة السائقين
     socket.on('driver_online', (driverId) => {
         socket.join('drivers_room');
         console.log(`Driver ${driverId} is Ready`);
     });
 
-    // تحديث موقع السائق (يرسل من تطبيق السائق)
     socket.on('update_location', (data) => {
-        // data = { driverId, lat, lng, orderId }
-        // نرسل الموقع للزبون صاحب الطلب فقط
         io.to(`order_${data.orderId}`).emit('driver_location', data);
     });
 
-    // انضمام الزبون لغرفة تتبع الطلب
     socket.on('track_order', (orderId) => {
         socket.join(`order_${orderId}`);
     });
@@ -182,11 +172,11 @@ io.on('connection', (socket) => {
     });
 });
 
-// --- API Routes (نقاط الاتصال) ---
+// --- API Routes ---
 
 app.get('/', (req, res) => res.send('🚀 Filo Server System is Running Securely!'));
 
-// 1️⃣ تسجيل حساب جديد (مع التشفير 🔒)
+// 1️⃣ تسجيل حساب جديد
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, name, phone } = req.body;
     try {
@@ -195,25 +185,21 @@ app.post('/api/auth/register', async (req, res) => {
             return res.status(400).json({ error: "البريد الإلكتروني مسجل بالفعل" });
         }
 
-        // 🔒 تشفير كلمة المرور (أهم خطوة للحماية)
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpiry = Date.now() + 10 * 60 * 1000;
 
         if (user) {
-            // تحديث مستخدم موجود غير مفعل
             user.password = hashedPassword;
             user.name = name;
             user.otp = otpCode;
             user.otpExpires = otpExpiry;
             await user.save();
         } else {
-            // إنشاء مستخدم جديد
             user = new User({
                 email,
-                password: hashedPassword, // نخزن المشفر
+                password: hashedPassword,
                 name,
                 phone,
                 otp: otpCode,
@@ -222,7 +208,6 @@ app.post('/api/auth/register', async (req, res) => {
             await user.save();
         }
 
-        // إرسال الإيميل (HTML Design)
         const emailDesign = `
         <div style="direction: rtl; font-family: sans-serif; text-align: center; background-color: #f4f4f4; padding: 20px;">
             <div style="background-color: #fff; padding: 30px; border-radius: 10px; max-width: 500px; margin: auto;">
@@ -249,14 +234,13 @@ app.post('/api/auth/register', async (req, res) => {
     }
 });
 
-// 2️⃣ تسجيل الدخول (التحقق الآمن)
+// 2️⃣ تسجيل الدخول
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ error: "البيانات غير صحيحة" });
 
-        // 🔒 مقارنة الباسوورد المدخل مع المشفر في الداتا
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) return res.status(400).json({ error: "البيانات غير صحيحة" });
 
@@ -277,7 +261,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
-// 3️⃣ تفعيل الحساب (OTP)
+// 3️⃣ تفعيل الحساب
 app.post('/api/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
@@ -298,7 +282,7 @@ app.post('/api/auth/verify', async (req, res) => {
     }
 });
 
-// 4️⃣ جلب المنيو (المنتجات)
+// 4️⃣ جلب المنيو
 app.get('/api/products', async (req, res) => {
     try {
         const products = await Product.find({ isAvailable: true });
@@ -308,17 +292,17 @@ app.get('/api/products', async (req, res) => {
     }
 });
 
-// 5️⃣ إنشاء طلب جديد (وربطه بالـ Socket)
+// 5️⃣ إنشاء طلب جديد
 app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order(req.body);
         const savedOrder = await newOrder.save();
 
-        // 🔔 إشعار فوري للمطعم وللأدمن عبر Socket.io
         io.emit('new_order', savedOrder);
 
         res.status(201).json(savedOrder);
     } catch (error) {
+        console.error("Order Error:", error);
         res.status(500).json({ error: "فشل إنشاء الطلب" });
     }
 });
