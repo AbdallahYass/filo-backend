@@ -229,7 +229,7 @@ app.post('/api/auth/register', async (req, res) => {
         <div style="direction: rtl; font-family: sans-serif; text-align: center; background-color: #f4f4f4; padding: 20px;">
             <div style="background-color: #fff; padding: 30px; border-radius: 10px; max-width: 500px; margin: auto;">
                 <h2 style="color: #C5A028;">أهلاً بك في فيلو! 🍔</h2>
-                <p>رمز التفعيل الخاص بك هو:</p>
+                <p>:رمز التفعيل الخاص بك هو:</p>
                 <h1 style="background: #eee; padding: 10px; letter-spacing: 5px;">${otpCode}</h1>
                 <p style="color: #888;">صالح لمدة 10 دقائق</p>
             </div>
