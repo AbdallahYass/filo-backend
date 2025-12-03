@@ -99,10 +99,10 @@ const Order = mongoose.model('Order', orderSchema);
 
 // ... (بعد الـ require في الأعلى)
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
-
+const MongoStore = require('connect-mongo').default || require('connect-mongo');
 // ... (بعد app.set trust proxy مباشرة)
-
+console.log("DEBUG MONGO STORE:", MongoStore); // 👈 أضف هذا السطر
+console.log("Type of MongoStore:", typeof MongoStore); // 👈 وهذا السطر
 // 👇 أضف إعدادات الجلسة هنا 👇
 app.use(session({
   secret: process.env.SESSION_SECRET || 'filo_secure_key',
