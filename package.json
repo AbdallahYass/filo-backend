@@ -11,9 +11,9 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@adminjs/express": "^6.1.1",
-    "@adminjs/mongoose": "^4.1.0",
-    "adminjs": "^7.8.17",
+    "@adminjs/express": "^5.1.0",
+    "@adminjs/mongoose": "^3.0.1",
+    "adminjs": "^6.1.4",
     "bcryptjs": "^3.0.3",
     "body-parser": "^2.2.1",
     "cors": "^2.8.5",

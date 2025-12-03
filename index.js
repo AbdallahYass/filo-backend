@@ -13,14 +13,19 @@ const AdminJSExpress = require('@adminjs/express');
 const AdminJSMongoose = require('@adminjs/mongoose');
 
 // --- إعدادات التطبيق والسيرفر ---
+// ... (الكود السابق كما هو)
+
 const app = express();
-const server = http.createServer(app); // ربطنا السيرفر بـ HTTP عشان الـ Socket
+const server = http.createServer(app);
+app.set('trust proxy', 1); 
 const io = new Server(server, {
     cors: {
-        origin: "*", // للسماح للتطبيقات بالاتصال
+        origin: "*",
         methods: ["GET", "POST"]
     }
 });
+
+// ... (باقي الكود كما هو تماماً)
 
 const PORT = process.env.PORT || 3000;
 
