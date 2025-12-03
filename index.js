@@ -96,6 +96,24 @@ const orderSchema = new mongoose.Schema({
 });
 const Order = mongoose.model('Order', orderSchema);
 
+// ... (بعد الـ require في الأعلى)
+const session = require('express-session');
+const MongoStore = require('connect-mongo');
+
+// ... (بعد app.set trust proxy مباشرة)
+
+// 👇 أضف إعدادات الجلسة هنا 👇
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'filo_secure_key',
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
+  cookie: {
+    secure: true, // ضروري عشان Render (https)
+    maxAge: 24 * 60 * 60 * 1000 // يوم واحد
+  }
+}));
+
 // --- إعداد لوحة التحكم (AdminJS) ---
 const startAdmin = async () => {
     const admin = new AdminJS({
