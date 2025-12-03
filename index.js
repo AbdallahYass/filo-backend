@@ -75,27 +75,28 @@ const productSchema = new mongoose.Schema({
 const Product = mongoose.model('Product', productSchema);
 
 // 👇 1. نعرّف شكل "المنتج داخل الطلب" بشكل منفصل (عشان AdminJS يفهمه)
-const orderItemSchema = new mongoose.Schema({
-    title: String,
-    quantity: Number,
-    price: Number
+const mongoose = require('mongoose');
+
+// 1. أولاً: عرف شكل البيانات للعنصر الواحد (Item)
+const OrderItemSchema = new mongoose.Schema({
+  product: { type: mongoose.Types.ObjectId, ref: 'Product' }, // مثال
+  quantity: { type: Number },
+  price: { type: Number }
 });
 
-// 👇 2. نستخدم التعريف السابق داخل جدول الطلبات
-const orderSchema = new mongoose.Schema({
-    customer: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    items: [orderItemSchema], // 👈 لاحظ: استخدمنا السكيما هنا بدل القوسين العاديين
-    totalPrice: Number,
-    status: { 
-        type: String, 
-        enum: ['pending', 'accepted', 'preparing', 'ready', 'picked_up', 'delivered', 'cancelled'], 
-        default: 'pending' 
-    },
-    driver: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-    deliveryAddress: String,
-    createdAt: { type: Date, default: Date.now }
+// 2. ثانياً: استخدمها داخل الموديل الرئيسي للطلب
+const OrderSchema = new mongoose.Schema({
+  customer: { type: mongoose.Types.ObjectId, ref: 'Customer' },
+  
+  // ✅ الحل: ضع السكيما الفرعية هنا بدلاً من []
+  items: [OrderItemSchema], 
+  
+  totalPrice: Number,
+  status: String,
+  // ... باقي الحقول
 });
-const Order = mongoose.model('Order', orderSchema);
+
+module.exports = mongoose.model('Order', OrderSchema);
 
 // ... (بعد الـ require في الأعلى)
 const session = require('express-session');
