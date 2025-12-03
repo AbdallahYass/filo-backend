@@ -74,9 +74,6 @@ const productSchema = new mongoose.Schema({
 });
 const Product = mongoose.model('Product', productSchema);
 
-// 👇 1. نعرّف شكل "المنتج داخل الطلب" بشكل منفصل (عشان AdminJS يفهمه)
-const mongoose = require('mongoose');
-
 // 1. أولاً: عرف شكل البيانات للعنصر الواحد (Item)
 const OrderItemSchema = new mongoose.Schema({
   product: { type: mongoose.Types.ObjectId, ref: 'Product' }, // مثال
