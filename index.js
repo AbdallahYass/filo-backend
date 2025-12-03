@@ -74,16 +74,17 @@ const productSchema = new mongoose.Schema({
 });
 const Product = mongoose.model('Product', productSchema);
 
-// جدول الطلبات
+// 👇 1. نعرّف شكل "المنتج داخل الطلب" بشكل منفصل (عشان AdminJS يفهمه)
+const orderItemSchema = new mongoose.Schema({
+    title: String,
+    quantity: Number,
+    price: Number
+});
+
+// 👇 2. نستخدم التعريف السابق داخل جدول الطلبات
 const orderSchema = new mongoose.Schema({
     customer: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    items: [
-        {
-            title: String,
-            quantity: Number,
-            price: Number
-        }
-    ],
+    items: [orderItemSchema], // 👈 لاحظ: استخدمنا السكيما هنا بدل القوسين العاديين
     totalPrice: Number,
     status: { 
         type: String, 
