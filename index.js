@@ -103,13 +103,10 @@ const startAdmin = async () => {
         rootPath: '/admin',
         branding: {
             companyName: 'Filo Dashboard',
-            logo: 'https://cdn-icons-png.flaticon.com/512/3081/3081367.png', // غيره برابط اللوجو تبعك
+            logo: 'https://cdn-icons-png.flaticon.com/512/3081/3081367.png',
             withMadeWithLove: false,
         },
-        dashboard: {
-            handler: async () => { return { some: 'data' } }, // صفحة رئيسية بسيطة
-            component: AdminJS.bundle('./admin-dashboard-component') // (اختياري)
-        }
+        // 👇👇👇 تم حذف قسم dashboard من هنا عشان يشتغل الافتراضي 👇👇👇
     });
     
     const adminRouter = AdminJSExpress.buildRouter(admin);
