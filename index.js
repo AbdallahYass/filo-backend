@@ -9,7 +9,7 @@ const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
-const MongoStore = require('connect-mongo').default || require('connect-mongo');
+const MongoStore = require('connect-mongo');
 
 // AdminJS Imports
 const AdminJS = require('adminjs');
@@ -21,12 +21,13 @@ const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
+// ضروري لـ Render عشان الكوكيز والبروكسي
 app.set('trust proxy', 1);
 
-// --- Socket.io ---
+// --- Socket.io (للطلبات الفورية) ---
 const io = new Server(server, {
     cors: {
-        origin: "*",
+        origin: "*", // للسماح للتطبيق والموقع بالاتصال
         methods: ["GET", "POST"]
     }
 });
@@ -34,117 +35,105 @@ const io = new Server(server, {
 // --- Middleware ---
 app.use(
   helmet({
-    contentSecurityPolicy: false, // تعطيل سياسة CSP مؤقتاً لتسمح لـ AdminJS بالعمل
+    contentSecurityPolicy: false, // تعطيل CSP مؤقتاً ليعمل AdminJS
     crossOriginEmbedderPolicy: false,
   })
 );
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // لدعم البيانات المرسلة من AdminJS
 
-// Rate Limiting
+// Rate Limiting (حماية من الضغط)
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 300,
-    message: "Too many requests from this IP, please try again later."
+    message: "Too many requests, please try again later."
 });
 app.use('/api', apiLimiter);
 
-// --- قاعدة البيانات (MongoDB) ---
+// --- قاعدة البيانات ---
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB Connected Securely'))
     .catch(err => console.error('❌ DB Connection Error:', err));
 
-// --- تعريف الجداول (Schemas) ---
-// تسجيل المودلز في AdminJS
+// --- الجداول (Schemas) ---
 AdminJS.registerAdapter(AdminJSMongoose);
 
-// 1. جدول المستخدمين
+// 1. المستخدمين
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     name: String,
-    role: { 
-        type: String, 
-        enum: ['user', 'driver', 'admin', 'owner'], 
-        default: 'user' 
-    },
+    role: { type: String, enum: ['user', 'driver', 'admin', 'owner'], default: 'user' },
+    // تفعيل الإيميل
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
+    // تفعيل الهاتف
     phone: String,
     phoneOtp: String,
     isPhoneVerified: { type: Boolean, default: false },
+    // إضافات
     location: { lat: Number, lng: Number },
     fcmToken: String
 });
 const User = mongoose.model('User', userSchema);
 
-// 2. جدول المنتجات
+// 2. المنتجات
 const productSchema = new mongoose.Schema({
     title: { type: String, required: true },
     description: String,
     price: { type: Number, required: true },
-    image: String,
+    imageUrl: String, // وحدنا الاسم ليكون imageUrl مثل التطبيق
     category: String,
-    vendorId: String,
     isAvailable: { type: Boolean, default: true }
 });
 const Product = mongoose.model('Product', productSchema);
+// ملاحظة: لكي يعمل التطبيق، سنستخدم اسم المودل "Menu" في الروابط للسهولة، أو نربط Product بـ Menu
+const Menu = mongoose.model('Menu', productSchema); // اسم مستعار ليتوافق مع كود التطبيق
 
-// 3. جدول الطلبات (تم تبسيطه لضمان عمل السيرفر)
-// 3. جدول الطلبات
+// 3. الطلبات
 const OrderSchema = new mongoose.Schema({
-    customer: { type: mongoose.Types.ObjectId, ref: 'User' },
-    
-    // ✅ التعديل هنا: استخدام Mixed بدلاً من Array
-    // هذا يحل مشكلة AdminJS تماماً لأنه يعامل الحقل كـ JSON حر
-    items: { type: mongoose.Schema.Types.Mixed, default: [] }, 
-    
+    // customer: { type: mongoose.Types.ObjectId, ref: 'User' }, // اختياري حالياً
+    items: { type: mongoose.Schema.Types.Mixed, default: [] }, // Mixed لحل مشاكل AdminJS
     totalPrice: Number,
     status: { type: String, default: 'pending' },
-    deliveryAddress: String,
-    driver: { type: mongoose.Types.ObjectId, ref: 'User' },
+    tableNumber: String, // مهم للكيو آر كود
+    date: { type: String, default: () => new Date().toISOString() }, // لتوحيد التاريخ
     createdAt: { type: Date, default: Date.now }
 });
 const Order = mongoose.model('Order', OrderSchema);
 
-
-// --- إعدادات الجلسة (Session) ---
+// --- إعدادات الجلسة (Session) لـ AdminJS ---
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'filo_secure_key',
+    secret: process.env.SESSION_SECRET || 'super_secret_filo_key',
     resave: false,
     saveUninitialized: false,
     store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
     cookie: {
-        secure: true, 
+        secure: true, // ضروري لـ Render (HTTPS)
+        sameSite: 'none', // ضروري للكروس دومين أحياناً
         maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
-// --- إعداد لوحة التحكم (AdminJS) ---
+// --- تشغيل AdminJS ---
 const startAdmin = async () => {
-    try {
-        const admin = new AdminJS({
-            databases: [mongoose],
-            rootPath: '/admin',
-            branding: {
-                companyName: 'Filo Dashboard',
-                logo: 'https://cdn-icons-png.flaticon.com/512/3081/3081367.png',
-                withMadeWithLove: false,
-            },
-        });
-
-        const adminRouter = AdminJSExpress.buildRouter(admin);
-        app.use(admin.options.rootPath, adminRouter);
-        console.log('👨‍💼 AdminJS initialized at /admin');
-    } catch (error) {
-        console.error("❌ AdminJS failed to start:", error);
-    }
+    const admin = new AdminJS({
+        databases: [mongoose],
+        rootPath: '/admin',
+        branding: {
+            companyName: 'Filo Dashboard',
+            logo: 'https://filomenu.com/assets/icons/icon-192.png', // شعار افتراضي
+            withMadeWithLove: false,
+        },
+    });
+    const adminRouter = AdminJSExpress.buildRouter(admin);
+    app.use(admin.options.rootPath, adminRouter);
 };
 startAdmin();
 
-
-// --- إعداد الإيميل ---
+// --- إعداد الإيميل (Brevo) ---
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 587,
@@ -155,166 +144,216 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// --- Socket.io Logic ---
+// --- Socket.io ---
 io.on('connection', (socket) => {
-    console.log(`⚡ New Connection: ${socket.id}`);
-
-    socket.on('driver_online', (driverId) => {
-        socket.join('drivers_room');
-        console.log(`Driver ${driverId} is Ready`);
-    });
-
-    socket.on('update_location', (data) => {
-        io.to(`order_${data.orderId}`).emit('driver_location', data);
-    });
-
-    socket.on('track_order', (orderId) => {
-        socket.join(`order_${orderId}`);
-    });
-
-    socket.on('disconnect', () => {
-        console.log('User Disconnected');
-    });
+    console.log(`⚡ New Socket: ${socket.id}`);
+    // يمكن إضافة غرف خاصة للسائقين أو المطبخ هنا
 });
+
+// --- تصميم الإيميل الموحد (الفخم) ---
+const getEmailDesign = (name, otpCode, messageTitle) => `
+<div style="font-family: 'Helvetica Neue', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 12px; overflow: hidden;">
+    <div style="background-color: #1A1A1A; padding: 30px; text-align: center;">
+        <h1 style="color: #C5A028; margin: 0; font-size: 28px; letter-spacing: 2px; font-weight: 800;">FILO MENU</h1>
+        <p style="color: #888; margin: 5px 0 0; font-size: 12px; letter-spacing: 1px;">PREMIUM DELIVERY</p>
+    </div>
+    <div style="padding: 40px 30px; text-align: center; color: #333333;">
+        <h2 style="margin-top: 0; color: #1A1A1A; font-size: 24px;">مرحباً بك يا ${name} 👋</h2>
+        <p style="font-size: 16px; line-height: 1.6; color: #555;">${messageTitle}</p>
+        <div style="margin: 35px 0;">
+            <div style="display: inline-block; background-color: #f8f9fa; border: 2px dashed #C5A028; padding: 15px 40px; border-radius: 8px;">
+                <span style="font-size: 32px; font-weight: 900; color: #1A1A1A; letter-spacing: 8px; font-family: monospace;">${otpCode}</span>
+            </div>
+        </div>
+        <p style="font-size: 14px; color: #999;">⚠️ الرمز صالح لمدة 10 دقائق.</p>
+    </div>
+    <div style="background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #999; border-top: 1px solid #e0e0e0;">
+        <p style="margin: 0;">&copy; 2025 Filo Menu. All rights reserved.</p>
+    </div>
+</div>
+`;
 
 // --- API Routes ---
 
-app.get('/', (req, res) => res.send('🚀 Filo Server System is Running Securely!'));
+app.get('/', (req, res) => res.send('🚀 Filo Server is Running!'));
 
-// 1️⃣ تسجيل حساب جديد
+// 1️⃣ تسجيل حساب جديد (مع التحقق من التكرار والتفعيل)
 app.post('/api/auth/register', async (req, res) => {
-    const { email, password, name, phone } = req.body;
+    const { email, password, name } = req.body;
     try {
         let user = await User.findOne({ email });
-        if (user && user.isVerified) {
-            return res.status(400).json({ error: "البريد الإلكتروني مسجل بالفعل" });
-        }
-
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpiry = Date.now() + 10 * 60 * 1000;
 
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         if (user) {
-            user.password = hashedPassword;
+            if (user.isVerified) {
+                return res.status(400).json({ error: "البريد الإلكتروني مستخدم بالفعل." });
+            }
+            // تحديث الحساب المعلق
             user.name = name;
+            user.password = hashedPassword;
             user.otp = otpCode;
             user.otpExpires = otpExpiry;
             await user.save();
         } else {
+            // إنشاء جديد
             user = new User({
-                email,
-                password: hashedPassword,
-                name,
-                phone,
-                otp: otpCode,
-                otpExpires: otpExpiry
+                email, password: hashedPassword, name,
+                isVerified: false,
+                otp: otpCode, otpExpires: otpExpiry
             });
             await user.save();
         }
 
-        const emailDesign = `
-        <div style="direction: rtl; font-family: sans-serif; text-align: center; background-color: #f4f4f4; padding: 20px;">
-            <div style="background-color: #fff; padding: 30px; border-radius: 10px; max-width: 500px; margin: auto;">
-                <h2 style="color: #C5A028;">أهلاً بك في فيلو! 🍔</h2>
-                <p>:رمز التفعيل الخاص بك هو:</p>
-                <h1 style="background: #eee; padding: 10px; letter-spacing: 5px;">${otpCode}</h1>
-                <p style="color: #888;">صالح لمدة 10 دقائق</p>
-            </div>
-        </div>
-        `;
-
         await transporter.sendMail({
-            from: '"Filo App" <no-reply@filo.com>',
+            from: '"Filo Menu Support" <no-reply@filomenu.com>',
             to: email,
             subject: '🔐 رمز تفعيل حسابك',
-            html: emailDesign
+            html: getEmailDesign(name, otpCode, "لتفعيل حسابك والبدء، يرجى استخدام الرمز أدناه:")
         });
-
-        res.status(201).json({ message: "تم التسجيل، يرجى تفعيل الحساب" });
+        
+        res.status(201).json({ message: "تم إرسال الرمز!" });
 
     } catch (error) {
-        console.error("Register Error:", error);
-        res.status(500).json({ error: "خطأ في السيرفر" });
+        console.error(error);
+        res.status(500).json({ error: "فشل التسجيل" });
     }
 });
 
-// 2️⃣ تسجيل الدخول
-app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body;
-    try {
-        const user = await User.findOne({ email });
-        if (!user) return res.status(400).json({ error: "البيانات غير صحيحة" });
-
-        const isMatch = await bcrypt.compare(password, user.password);
-        if (!isMatch) return res.status(400).json({ error: "البيانات غير صحيحة" });
-
-        if (!user.isVerified) return res.status(403).json({ error: "الحساب غير مفعل" });
-
-        res.json({
-            message: "تم تسجيل الدخول بنجاح",
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role
-            }
-        });
-    } catch (error) {
-        console.error("Login Error:", error);
-        res.status(500).json({ error: "خطأ في السيرفر" });
-    }
-});
-
-// 3️⃣ تفعيل الحساب
+// 2️⃣ تفعيل الإيميل
 app.post('/api/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ error: "المستخدم غير موجود" });
-
+        
         if (user.otp !== otp || user.otpExpires < Date.now()) {
-            return res.status(400).json({ error: "الرمز غير صحيح أو منتهي الصلاحية" });
+            return res.status(400).json({ error: "الرمز غير صحيح أو منتهي" });
         }
 
         user.isVerified = true;
         user.otp = undefined;
+        user.otpExpires = undefined;
         await user.save();
 
-        res.json({ message: "تم تفعيل الحساب بنجاح!" });
+        res.status(200).json({ message: "تم التفعيل!" });
     } catch (error) {
         res.status(500).json({ error: "خطأ في التفعيل" });
     }
 });
 
-// 4️⃣ جلب المنيو
-app.get('/api/products', async (req, res) => {
+// 3️⃣ تسجيل الدخول (مع فحص الهاتف والإيميل)
+app.post('/api/auth/login', async (req, res) => {
+    const { email, password } = req.body;
     try {
-        const products = await Product.find({ isAvailable: true });
-        res.json(products);
+        const user = await User.findOne({ email });
+        if (!user) return res.status(401).json({ error: "البيانات غير صحيحة" });
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) return res.status(401).json({ error: "البيانات غير صحيحة" });
+
+        // فحص الإيميل
+        if (!user.isVerified) {
+            const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+            user.otp = otpCode;
+            user.otpExpires = Date.now() + 10 * 60 * 1000;
+            await user.save();
+
+            await transporter.sendMail({
+                from: '"Filo Menu Support" <no-reply@filomenu.com>',
+                to: email,
+                subject: '⚠️ تفعيل حسابك مطلوب',
+                html: getEmailDesign(user.name, otpCode, "حاولت تسجيل الدخول والحساب غير مفعل. رمزك الجديد:")
+            });
+            return res.status(403).json({ error: "NOT_VERIFIED", message: "الإيميل غير مفعل" });
+        }
+
+        // فحص الهاتف
+        if (!user.isPhoneVerified) {
+            return res.status(403).json({ error: "PHONE_NOT_VERIFIED", message: "رقم الهاتف غير مفعل" });
+        }
+
+        res.json({ message: "تم الدخول!", user: { name: user.name, email: user.email, role: user.role } });
+
     } catch (error) {
-        res.status(500).json({ error: "فشل جلب المنتجات" });
+        res.status(500).json({ error: "خطأ سيرفر" });
     }
 });
 
-// 5️⃣ إنشاء طلب جديد
+// 4️⃣ طلب رمز الهاتف
+app.post('/api/auth/phone/send', async (req, res) => {
+    const { email, phone } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+        const smsCode = Math.floor(1000 + Math.random() * 9000).toString();
+        user.phone = phone;
+        user.phoneOtp = smsCode;
+        await user.save();
+
+        console.log(`📲 SMS to ${phone}: ${smsCode}`); // محاكاة
+        res.json({ message: "تم إرسال الرمز" });
+    } catch (error) {
+        res.status(500).json({ error: "فشل الإرسال" });
+    }
+});
+
+// 5️⃣ تفعيل الهاتف
+app.post('/api/auth/phone/verify', async (req, res) => {
+    const { email, otp } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "المستخدم غير موجود" });
+
+        if (user.phoneOtp !== otp) return res.status(400).json({ error: "رمز الهاتف خطأ" });
+
+        user.isPhoneVerified = true;
+        user.phoneOtp = undefined;
+        await user.save();
+
+        res.json({ message: "تم تفعيل الهاتف!" });
+    } catch (error) {
+        res.status(500).json({ error: "فشل التفعيل" });
+    }
+});
+
+// --- المنيو والطلبات ---
+app.get('/api/menu', async (req, res) => {
+    try {
+        // جلب المنتجات وعكس ترتيبها لتظهر الأحدث أولاً
+        const menu = await Menu.find().sort({ _id: -1 });
+        res.json(menu);
+    } catch (error) {
+        res.status(500).json({ error: "Error" });
+    }
+});
+
+app.get('/api/orders', async (req, res) => {
+    const orders = await Order.find().sort({ createdAt: -1 }); // الأحدث أولاً
+    res.json(orders);
+});
+
 app.post('/api/orders', async (req, res) => {
+    const orderData = req.body;
     try {
-        const newOrder = new Order(req.body);
+        const newOrder = new Order(orderData);
         const savedOrder = await newOrder.save();
-
+        
+        // إشعار المطبخ فوراً (Socket.io)
         io.emit('new_order', savedOrder);
-
-        res.status(201).json(savedOrder);
+        
+        res.status(201).json({ message: "Saved!" });
     } catch (error) {
-        console.error("Order Error:", error);
-        res.status(500).json({ error: "فشل إنشاء الطلب" });
+        res.status(500).json({ error: "Error" });
     }
 });
 
-// --- تشغيل السيرفر ---
+// تشغيل السيرفر
 server.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`🔐 Security Layers Active`);
-    console.log(`👨‍💼 Admin Dashboard: http://localhost:${PORT}/admin`);
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`👨‍💼 Admin Panel: https://filo-menu.onrender.com/admin`);
 });
