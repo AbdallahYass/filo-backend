@@ -9,8 +9,7 @@ const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
-
+const MongoStore = require('connect-mongo').default || require('connect-mongo');
 // AdminJS Imports
 const AdminJS = require('adminjs');
 const AdminJSExpress = require('@adminjs/express');
