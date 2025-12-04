@@ -9,25 +9,25 @@ const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 const bcrypt = require('bcryptjs');
 const session = require('express-session');
-// استيراد MongoStore بالطريقة التي تمنع الأخطاء
-const MongoStore = require('connect-mongo').default || require('connect-mongo');
+const MongoStore = require('connect-mongo');
 
 // AdminJS Imports
 const AdminJS = require('adminjs');
 const AdminJSExpress = require('@adminjs/express');
 const AdminJSMongoose = require('@adminjs/mongoose');
 
+const path = require("path");
+
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 
-// تسجيل المودلز في AdminJS
 AdminJS.registerAdapter(AdminJSMongoose);
 
 const startServer = async () => {
     const app = express();
     const server = http.createServer(app);
 
-    // 1. الاتصال بقاعدة البيانات
+    // ***** Database *****
     try {
         await mongoose.connect(MONGO_URI);
         console.log('✅ MongoDB Connected Securely');
@@ -36,7 +36,7 @@ const startServer = async () => {
         return;
     }
 
-    // --- تعريف الجداول (Schemas) ---
+    // ***** Schema *****
     const userSchema = new mongoose.Schema({
         email: { type: String, required: true, unique: true },
         password: { type: String, required: true },
@@ -62,7 +62,6 @@ const startServer = async () => {
     const Menu = mongoose.models.Menu || mongoose.model('Menu', productSchema);
 
     const OrderSchema = new mongoose.Schema({
-        // استخدام Mixed لتجنب مشاكل AdminJS مع المصفوفات المعقدة
         items: { type: mongoose.Schema.Types.Mixed, default: [] },
         totalPrice: Number,
         status: { type: String, default: 'pending' },
@@ -72,15 +71,15 @@ const startServer = async () => {
     });
     const Order = mongoose.models.Order || mongoose.model('Order', OrderSchema);
 
-    // 2. إعدادات الأمان والبروكسي (قبل كل شيء)
+    // ***** Security *****
     app.set('trust proxy', 1);
     app.use(helmet({
-        contentSecurityPolicy: false, // ضروري لعمل AdminJS
+        contentSecurityPolicy: false,
         crossOriginEmbedderPolicy: false,
     }));
     app.use(cors());
 
-    // 3. إعداد الجلسة (Session) - ضروري للأدمن
+    // ***** Session *****
     app.use(session({
         secret: process.env.SESSION_SECRET || 'filo_secure_key',
         resave: false,
@@ -92,21 +91,27 @@ const startServer = async () => {
         }
     }));
 
-    // 4. إعداد وتشغيل AdminJS (يجب أن يكون هنا قبل body-parser) 🚨
-    // هذا الترتيب هو الذي يحل مشكلة NotFoundError
+    // ***** AdminJS (Fix for Render + NotFoundError) *****
     const admin = new AdminJS({
+        rootPath: "/admin",
         resources: [User, Product, Order],
-        rootPath: '/admin',
         branding: {
             companyName: 'Filo Dashboard',
             logo: 'https://filomenu.com/assets/icons/filo.png',
             withMadeWithLove: false,
-        },
+        }
     });
+
+    // Fix Render + Static Files Issue
+    admin.watch(); // مهم جداً جداً
+
+    // Serve AdminJS static files
+    app.use(admin.options.rootPath, express.static(path.join(__dirname, 'public')));
+
     const adminRouter = AdminJSExpress.buildRouter(admin);
     app.use(admin.options.rootPath, adminRouter);
 
-    // 5. تفعيل قراءة JSON (لباقي التطبيق - يأتي بعد الأدمن)
+    // ***** Body Parser *****
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
@@ -114,12 +119,15 @@ const startServer = async () => {
     const apiLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
     app.use('/api', apiLimiter);
 
-    // 6. Socket.io & Email
+    // ***** Socket.io *****
     const io = new Server(server, {
         cors: { origin: "*", methods: ["GET", "POST"] }
     });
-    io.on('connection', (socket) => { console.log(`⚡ New Socket: ${socket.id}`); });
+    io.on('connection', (socket) => {
+        console.log(`⚡ New Socket: ${socket.id}`);
+    });
 
+    // ***** Email *****
     const transporter = nodemailer.createTransport({
         host: "smtp-relay.brevo.com",
         port: 587,
@@ -127,26 +135,20 @@ const startServer = async () => {
         auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS }
     });
 
-    // 7. API Routes Middleware (حماية بكلمة سر)
+    // ***** API Key Protection *****
     const checkAuth = (req, res, next) => {
-        // السماح لصفحة الأدمن والصفحة الرئيسية بالمرور
         if (req.path === '/' || req.path.startsWith('/admin')) return next();
-        
+
         const secret = req.headers['x-api-key'];
-        if (secret === process.env.API_SECRET) {
-            next();
-        } else {
-            res.status(403).json({ error: "Access Denied" });
-        }
+        if (secret === process.env.API_SECRET) next();
+        else res.status(403).json({ error: "Access Denied" });
     };
-    // تطبيق الحماية على الروابط التي تبدأ بـ /api فقط
     app.use('/api', checkAuth);
 
-    // --- APIs ---
-
+    // ***** APIs *****
     app.get('/', (req, res) => res.send('🚀 Filo Server is Running!'));
 
-    // تسجيل
+    // Register
     app.post('/api/auth/register', async (req, res) => {
         const { email, password, name } = req.body;
         try {
@@ -158,131 +160,103 @@ const startServer = async () => {
 
             if (user) {
                 if (user.isVerified) return res.status(400).json({ error: "البريد مسجل مسبقاً" });
-                // تحديث حساب غير مفعل
-                user.name = name; user.password = hashedPassword; user.otp = otpCode; user.otpExpires = otpExpiry;
+                user.name = name; 
+                user.password = hashedPassword; 
+                user.otp = otpCode; 
+                user.otpExpires = otpExpiry;
                 await user.save();
             } else {
                 user = new User({ email, password: hashedPassword, name, isVerified: false, otp: otpCode, otpExpires: otpExpiry });
                 await user.save();
             }
-            
-            // تصميم الإيميل
-             const emailDesign = `
-            <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
-                <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
-                    <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
+
+            const emailDesign = `
+                <div style="font-family: Arial; text-align:center;">
+                    <h1>Filo Menu</h1>
+                    <p>رمز التفعيل: <b>${otpCode}</b></p>
                 </div>
-                <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
-                    <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
-                    <p style="color: #666; font-size: 16px; line-height: 1.5;">رمز التفعيل الخاص بك هو:</p>
-                    <div style="margin: 30px 0;">
-                        <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">${otpCode}</span>
-                    </div>
-                    <p style="color: #999; font-size: 14px;">⚠️ الرمز صالح لمدة 10 دقائق.</p>
-                </div>
-            </div>`;
+            `;
 
             await transporter.sendMail({
                 from: '"Filo Support" <no-reply@filomenu.com>',
                 to: email, subject: '🔐 رمز التفعيل', html: emailDesign
             });
+
             res.status(201).json({ message: "تم إرسال الرمز" });
-        } catch (error) { res.status(500).json({ error: "خطأ" }); }
+        } catch (error) {
+            res.status(500).json({ error: "خطأ" });
+        }
     });
 
-    // تفعيل الإيميل
+    // Verify Email
     app.post('/api/auth/verify', async (req, res) => {
         const { email, otp } = req.body;
         try {
             const user = await User.findOne({ email });
             if (!user || user.otp !== otp) return res.status(400).json({ error: "رمز خطأ" });
-            user.isVerified = true; user.otp = undefined;
+            user.isVerified = true;
+            user.otp = undefined;
             await user.save();
             res.json({ message: "تم التفعيل" });
-        } catch (error) { res.status(500).json({ error: "خطأ" }); }
+        } catch {
+            res.status(500).json({ error: "خطأ" });
+        }
     });
 
-    // دخول
+    // Login
     app.post('/api/auth/login', async (req, res) => {
         const { email, password } = req.body;
         try {
             const user = await User.findOne({ email });
             if (!user) return res.status(400).json({ error: "بيانات خطأ" });
+
             const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) return res.status(400).json({ error: "بيانات خطأ" });
-            
+
             if (!user.isVerified) {
-                 // إعادة إرسال الرمز
                 const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-                user.otp = otpCode; user.otpExpires = Date.now() + 10 * 60 * 1000;
+                user.otp = otpCode;
+                user.otpExpires = Date.now() + 10 * 60 * 1000;
                 await user.save();
-                
-                const emailDesign = `<div style="text-align:center"><h2>مرحباً ${user.name}</h2><p>حسابك غير مفعل. رمزك الجديد: <b>${otpCode}</b></p></div>`;
+
                 await transporter.sendMail({
-                    from: '"Filo Support" <no-reply@filomenu.com>',
-                    to: email, subject: 'تفعيل الحساب', html: emailDesign
+                    from: '"Filo Support"',
+                    to: email,
+                    subject: 'تفعيل الحساب',
+                    html: `<p>رمزك الجديد: <b>${otpCode}</b></p>`
                 });
+
                 return res.status(403).json({ error: "NOT_VERIFIED" });
             }
 
-            if (!user.isPhoneVerified && user.phone) {
-                 return res.status(403).json({ error: "PHONE_NOT_VERIFIED" });
-            }
-            
             res.json({ message: "تم الدخول", user: { name: user.name, email: user.email } });
-        } catch (error) { res.status(500).json({ error: "خطأ" }); }
-    });
-    
-    // إرسال رمز الهاتف
-    app.post('/api/auth/phone/send', async (req, res) => {
-        const { email, phone } = req.body;
-        try {
-            const user = await User.findOne({ email });
-            if (!user) return res.status(404).json({ error: "مستخدم غير موجود" });
-            const smsCode = Math.floor(1000 + Math.random() * 9000).toString();
-            user.phone = phone; user.phoneOtp = smsCode;
-            await user.save();
-            console.log(`📲 SMS to ${phone}: ${smsCode}`);
-            res.json({ message: "تم الإرسال" });
-        } catch (error) { res.status(500).json({ error: "خطأ" }); }
+        } catch {
+            res.status(500).json({ error: "خطأ" });
+        }
     });
 
-    // تفعيل الهاتف
-    app.post('/api/auth/phone/verify', async (req, res) => {
-        const { email, otp } = req.body;
-        try {
-            const user = await User.findOne({ email });
-            if (!user || user.phoneOtp !== otp) return res.status(400).json({ error: "رمز خطأ" });
-            user.isPhoneVerified = true; user.phoneOtp = undefined;
-            await user.save();
-            res.json({ message: "تم تفعيل الهاتف" });
-        } catch (error) { res.status(500).json({ error: "خطأ" }); }
-    });
+    // Menu
+    app.get('/api/menu', async (_, res) => res.json(await Menu.find().sort({ _id: -1 })));
 
-    // المنيو والطلبات
-    app.get('/api/menu', async (req, res) => {
-        const menu = await Menu.find().sort({ _id: -1 });
-        res.json(menu);
-    });
-
+    // Save Order
     app.post('/api/orders', async (req, res) => {
         try {
             const newOrder = new Order(req.body);
             const savedOrder = await newOrder.save();
             io.emit('new_order', savedOrder);
             res.status(201).json({ message: "Saved!" });
-        } catch (error) { res.status(500).json({ error: "Error" }); }
-    });
-    
-    app.get('/api/orders', async (req, res) => {
-        const orders = await Order.find().sort({ createdAt: -1 });
-        res.json(orders);
+        } catch {
+            res.status(500).json({ error: "Error" });
+        }
     });
 
-    // تشغيل السيرفر
+    // Get Orders
+    app.get('/api/orders', async (_, res) => res.json(await Order.find().sort({ createdAt: -1 })));
+
+    // ***** Start Server *****
     server.listen(PORT, () => {
-        console.log(`✅ Server running on port ${PORT}`);
-        console.log(`👨‍💼 Admin Panel: https://filo-menu.onrender.com/admin`);
+        console.log(`✅ Running on ${PORT}`);
+        console.log(`👨‍💼 Admin Panel: /admin`);
     });
 };
 
