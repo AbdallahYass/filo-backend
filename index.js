@@ -92,12 +92,13 @@ const productSchema = new mongoose.Schema({
 const Product = mongoose.model('Product', productSchema);
 
 // 3. جدول الطلبات (تم تبسيطه لضمان عمل السيرفر)
+// 3. جدول الطلبات
 const OrderSchema = new mongoose.Schema({
     customer: { type: mongoose.Types.ObjectId, ref: 'User' },
     
-    // ✅✅✅ التعديل الجذري هنا: تعريفها كمصفوفة عامة ✅✅✅
-    // هذا يمنع AdminJS من محاولة تحليل النوع الداخلي وبالتالي يمنع الانهيار
-    items: { type: Array, default: [] }, 
+    // ✅ التعديل هنا: استخدام Mixed بدلاً من Array
+    // هذا يحل مشكلة AdminJS تماماً لأنه يعامل الحقل كـ JSON حر
+    items: { type: mongoose.Schema.Types.Mixed, default: [] }, 
     
     totalPrice: Number,
     status: { type: String, default: 'pending' },
