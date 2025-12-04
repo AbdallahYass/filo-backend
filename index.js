@@ -86,12 +86,13 @@ const productSchema = new mongoose.Schema({
 });
 const Product = mongoose.model('Product', productSchema);
 
-// 3. جدول الطلبات (التعديل النهائي لمنع الانهيار)
+// 3. جدول الطلبات (تم تبسيطه لضمان عمل السيرفر)
 const OrderSchema = new mongoose.Schema({
     customer: { type: mongoose.Types.ObjectId, ref: 'User' },
     
-    // ✅✅✅ التعديل هنا: استخدام Mixed لمنع AdminJS من الانهيار ✅✅✅
-    items: { type: [mongoose.Schema.Types.Mixed] }, 
+    // ✅✅✅ التعديل الجذري هنا: تعريفها كمصفوفة عامة ✅✅✅
+    // هذا يمنع AdminJS من محاولة تحليل النوع الداخلي وبالتالي يمنع الانهيار
+    items: { type: Array, default: [] }, 
     
     totalPrice: Number,
     status: { type: String, default: 'pending' },
