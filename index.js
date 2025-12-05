@@ -216,7 +216,7 @@ app.post('/api/auth/register', async (req, res) => {
         res.status(500).json({ error: "فشل التسجيل1", details: error.message });
     }
 });
-
+//
 app.post('/api/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
