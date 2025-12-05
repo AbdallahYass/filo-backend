@@ -208,7 +208,8 @@ app.post('/api/auth/register', async (req, res) => {
             await user.save();
         }
 
-        await sendOTPEmail(email, name, otpCode);
+      //  await sendOTPEmail(email, name, otpCode);
+      console.log("TESTING OTP CODE:", otpCode);
         res.status(201).json({ message: "تم إرسال الرمز!" });
     } catch (error) {
         console.error("❌ تفاصيل الخطأ:", error); // هذا السطر سيطبع السبب في التيرمينال
