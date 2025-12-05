@@ -6,7 +6,8 @@ const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
-
+// في بداية ملفك
+const bcrypt = require('bcrypt');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
@@ -55,7 +56,7 @@ app.use('/api', checkAuth);
 // --- الجداول (Schemas) ---
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
+    password: { type: String, required: true, select: false },
     name: String,
     role: { type: String, default: 'user' },
     // بيانات الإيميل
@@ -67,6 +68,18 @@ const userSchema = new mongoose.Schema({
     phoneOtp: String,
     isPhoneVerified: { type: Boolean, default: false }
 });
+userSchema.pre('save', async function(next) {
+    const user = this;
+    if (!user.isModified('password') || user.password.length > 50) return next();
+    try {
+        const salt = await bcrypt.genSalt(10); // توليد الملح (Salt)
+        user.password = await bcrypt.hash(user.password, salt); // تشفير كلمة المرور
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
+
 const User = mongoose.model('User', userSchema);
 
 const orderSchema = new mongoose.Schema({
@@ -241,12 +254,16 @@ app.post('/api/auth/phone/verify', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     try {
-        const user = await User.findOne({ email });
+        const user = await User.findOne({ email }).select('+password');
         
-        if (!user || user.password !== password) {
+        if (!user) {
             return res.status(401).json({ error: "البيانات غير صحيحة" });
         }
+        const isPasswordMatch = await bcrypt.compare(password, user.password);
 
+        if (!isPasswordMatch) {
+            return res.status(401).json({ error: "البيانات غير صحيحة" });
+        }
         // فحص تفعيل الإيميل
         if (!user.isVerified) {
             const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -289,7 +306,7 @@ app.post('/api/auth/login', async (req, res) => {
         if (!user.isPhoneVerified) {
             return res.status(403).json({ error: "PHONE_NOT_VERIFIED", message: "رقم الهاتف غير مفعل" });
         }
-
+        user.password = undefined;
         res.json({ message: "تم الدخول!", user: { name: user.name, email: user.email } });
 
     } catch (error) {
