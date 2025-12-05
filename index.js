@@ -212,7 +212,7 @@ app.post('/api/auth/register', async (req, res) => {
         res.status(201).json({ message: "تم إرسال الرمز!" });
     } catch (error) {
         console.error("❌ تفاصيل الخطأ:", error); // هذا السطر سيطبع السبب في التيرمينال
-        res.status(500).json({ error: "فشل التسجيل", details: error.message });
+        res.status(500).json({ error: "فشل التسجيل1", details: error.message });
     }
 });
 
