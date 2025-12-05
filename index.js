@@ -138,9 +138,16 @@ const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 
 // 1. التحقق من التوكن (Authentication)
 const authMiddleware = (req, res, next) => {
-    // المسارات العامة (لا تحتاج توكن)
-    if (req.path.startsWith('/api/auth') || req.path === '/') return next();
-    if (req.method === 'GET' && req.path === '/api/menu') return next();
+    // 👇 طباعة للمراقبة (عشان تشوف المسار اللي شايفه السيرفر)
+    console.log("Middleware Path Check:", req.path);
+
+    // 1. السماح للمسارات العامة (تسجيل، تفعيل، دخول، عرض منيو)
+    // المشكلة كانت هنا: المسار يوصل '/auth/register' بدون كلمة api
+    if (req.path.startsWith('/auth') || 
+        req.path.startsWith('/api/auth') || 
+        (req.method === 'GET' && req.path === '/menu')) {
+        return next(); // تفضل، ادخل بدون توكن
+    }
 
     try {
         const authHeader = req.headers.authorization;
