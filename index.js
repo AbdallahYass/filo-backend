@@ -99,8 +99,8 @@ const Menu = mongoose.model('Menu', menuSchema);
 
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 587,
-    secure: false,
+    port: 2525, // 👈 غيّرنا المنفذ هنا إلى 2525
+    secure: false, // يبقى false مع هذا المنفذ
     auth: { user: EMAIL_USER, pass: EMAIL_PASS },
     tls: { ciphers: 'SSLv3', rejectUnauthorized: false }
 });
@@ -196,7 +196,7 @@ app.use('/api', authMiddleware);
 
 app.get('/', (req, res) => res.send('Filo Server is Live! 🚀'));
 
-
+//
 /**
  * ============================================================
  * 6. ROUTES (نقاط الاتصال)
