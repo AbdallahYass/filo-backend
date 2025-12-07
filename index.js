@@ -97,20 +97,10 @@ const Menu = mongoose.model('Menu', menuSchema);
  * ============================================================
  */
 
-const transporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587,            // 👈 أفضل منفذ للاستضافات السحابية
-    secure: false,        // 👈 يجب أن تكون false مع المنفذ 587
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    },
-    tls: {
-        rejectUnauthorized: false // 👈 لتجاهل مشاكل شهادات الحماية إن وجدت
-    }
-});
-
 const sendOTPEmail = async (email, name, otpCode) => {
+    const url = "https://api.brevo.com/v3/smtp/email";
+    
+    // تصميم الإيميل (نفس تصميمك السابق)
     const emailDesign = `
     <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
         <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
@@ -130,15 +120,38 @@ const sendOTPEmail = async (email, name, otpCode) => {
     </div>
     `;
 
-    await transporter.sendMail({
-        from: '"Filo Menu Support" <no-reply@filomenu.com>',
-        to: email,
-        subject: '🔐 رمز تفعيل حسابك',
-        html: emailDesign
-    });
+    const options = {
+        method: "POST",
+        headers: {
+            "accept": "application/json",
+            "content-type": "application/json",
+            "api-key": process.env.BREVO_API_KEY // 👈 مفتاح الـ API الجديد
+        },
+        body: JSON.stringify({
+            sender: { 
+                name: "Filo Menu Support", 
+                email: process.env.EMAIL_USER // ⚠️ يجب أن يكون هذا الإيميل مفعلاً كمرسل في Brevo
+            },
+            to: [{ email: email, name: name }],
+            subject: "🔐 رمز تفعيل حسابك",
+            htmlContent: emailDesign
+        })
+    };
+
+    try {
+        // نستخدم fetch المدمج في Node.js لإرسال الطلب
+        const response = await fetch(url, options);
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("❌ فشل إرسال الإيميل (API Error):", JSON.stringify(errorData));
+        } else {
+            console.log(`✅ تم إرسال رمز التفعيل بنجاح إلى: ${email}`);
+        }
+    } catch (error) {
+        console.error("❌ خطأ في الاتصال بخدمة Brevo:", error);
+    }
 };
-
-
 /**
  * ============================================================
  * 4. MIDDLEWARES (الطبقات الوسيطة)
@@ -228,7 +241,7 @@ app.post('/api/auth/register', async (req, res) => {
 
         //await sendOTPEmail(email, name, otpCode);
        // console.log("TESTING OTP CODE:", otpCode);
-       sendOTPEmail(email, name, otpCode).catch(err => console.error("فشل إرسال الإيميل في الخلفية:", err));
+       
         res.status(201).json({ message: "تم إرسال الرمز!" });
     } catch (error) {
         console.error("❌ تفاصيل الخطأ:", error); // هذا السطر سيطبع السبب في التيرمينال
