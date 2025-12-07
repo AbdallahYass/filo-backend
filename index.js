@@ -336,6 +336,84 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Error" }); }
 });
 
+
+// --- Google Auth Route (New) ---
+app.post('/api/auth/google', async (req, res) => {
+    const { accessToken } = req.body;
+
+    if (!accessToken) {
+        return res.status(400).json({ error: "Access token is required" });
+    }
+
+    try {
+        // 1. التحقق من التوكن وجلب بيانات المستخدم من جوجل
+        const googleResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        if (!googleResponse.ok) {
+            return res.status(400).json({ error: "Invalid Google Token" });
+        }
+
+        const googleData = await googleResponse.json();
+        const { email, name, sub, picture } = googleData; // sub هو الـ Google ID
+
+        // 2. البحث عن المستخدم في الداتابيز
+        let user = await User.findOne({ email });
+
+        if (user) {
+            // --- المستخدم موجود مسبقاً ---
+            
+            // تحديث الاسم أو الصورة إذا حبيت (اختياري)
+            // user.name = name;
+            // await user.save();
+
+        } else {
+            // --- مستخدم جديد (أول مرة) ---
+            
+            // ملاحظة: بما أن الباسوورد مطلوب في الموديل، بنعمل باسوورد عشوائي قوي
+            // المستخدم ما رح يستخدمه، رح يدخل دائماً عبر جوجل
+            const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+
+            user = new User({
+                email: email,
+                name: name,
+                password: randomPassword, // سيتم تشفيره تلقائياً عبر الـ Pre-save hook
+                role: 'customer', // الدور الافتراضي
+                isVerified: true, // جوجل يعتبر جهة موثوقة، فالحساب مفعل
+                isPhoneVerified: false, // لا يزال يحتاج تفعيل رقم الهاتف لاحقاً
+                // يمكن حفظ الصورة إذا عدلت الموديل لاحقاً
+                // photoUrl: picture 
+            });
+
+            await user.save();
+        }
+
+        // 3. إنشاء التوكن الخاص بسيرفرنا (JWT)
+        const token = jwt.sign(
+            { userId: user._id, role: user.role }, 
+            JWT_SECRET, 
+            { expiresIn: '30d' }
+        );
+
+        // 4. إرسال الرد للتطبيق
+        res.status(200).json({
+            message: "Google Login Success",
+            token: token,
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isVerified: user.isVerified
+            }
+        });
+
+    } catch (error) {
+        console.error("Google Auth Error:", error);
+        res.status(500).json({ error: "Internal Server Error during Google Auth" });
+    }
+});
 // --- 📱 PHONE OTP ROUTES (مهم جداً لتطبيق فلاتر) ---
 
 // إرسال كود الهاتف (وهمي حالياً لعدم وجود اشتراك SMS)
@@ -346,8 +424,6 @@ app.post('/api/auth/phone/send', async (req, res) => {
     console.log(`📲 [MOCK SMS] Sending code to ${phone} for user ${email}`);
     res.status(200).json({ message: "SMS sent (Mock)" });
 });
-
-
 // التحقق من كود الهاتف
 app.post('/api/auth/phone/verify', async (req, res) => {
     const { email, otp } = req.body;
