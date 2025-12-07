@@ -414,8 +414,58 @@ app.post('/api/auth/google', async (req, res) => {
         res.status(500).json({ error: "Internal Server Error during Google Auth" });
     }
 });
-// --- 📱 PHONE OTP ROUTES (مهم جداً لتطبيق فلاتر) ---
+// --- Forgot Password Flow ---
 
+// 1. طلب إعادة تعيين كلمة المرور (إرسال الكود)
+app.post('/api/auth/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "Email not found" });
+
+        // إنشاء كود جديد
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = otpCode;
+        user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 دقائق
+        await user.save();
+
+        // إرسال الإيميل (تعديل الرسالة لتكون مناسبة للريسيت)
+        await sendOTPEmail(email, user.name || "User", otpCode);
+
+        res.json({ message: "OTP sent to email" });
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// 2. تعيين كلمة المرور الجديدة
+app.post('/api/auth/reset-password', async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        // التحقق من الكود والوقت
+        if (user.otp !== otp || user.otpExpires < Date.now()) {
+            return res.status(400).json({ error: "Invalid or Expired OTP" });
+        }
+
+        // تحديث كلمة المرور
+        user.password = newPassword; // الـ Hook في الموديل رح يشفرها تلقائياً
+        user.otp = undefined; // حذف الكود
+        user.otpExpires = undefined;
+        
+        // مهم جداً: إذا كان الحساب غير مفعل، نفعله بالمرة
+        if (!user.isVerified) user.isVerified = true;
+
+        await user.save();
+
+        res.json({ message: "Password updated successfully" });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
 // إرسال كود الهاتف (وهمي حالياً لعدم وجود اشتراك SMS)
 app.post('/api/auth/phone/send', async (req, res) => {
     const { email, phone } = req.body;
