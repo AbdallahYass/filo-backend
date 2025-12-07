@@ -426,7 +426,52 @@ app.post('/api/user/update-phone', authMiddleware, async (req, res) => {
     }
 });
 
+// 1. جلب بيانات المستخدم الحالية
+app.get('/api/user/profile', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
 
+// 2. تحديث الاسم ورقم الهاتف
+app.put('/api/user/update-profile', authMiddleware, async (req, res) => {
+    const { name, phone } = req.body;
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        if (name) user.name = name;
+        if (phone) user.phone = phone;
+
+        await user.save();
+        res.json({ message: "Profile updated successfully", user });
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// 3. تغيير كلمة المرور (للمسجل دخول)
+app.put('/api/user/change-password', authMiddleware, async (req, res) => {
+    const { oldPassword, newPassword } = req.body;
+    try {
+        const user = await User.findById(req.userData.userId).select('+password');
+        
+        // التحقق من الباسورد القديم
+        const isMatch = await bcrypt.compare(oldPassword, user.password);
+        if (!isMatch) return res.status(400).json({ error: "Incorrect old password" });
+
+        user.password = newPassword;
+        await user.save();
+        
+        res.json({ message: "Password changed successfully" });
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
 // ================= MENU & ORDERS =================
 
 app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
