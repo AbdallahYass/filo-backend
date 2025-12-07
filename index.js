@@ -49,18 +49,22 @@ const userSchema = new mongoose.Schema({
     isPhoneVerified: { type: Boolean, default: false }
 });
 
-userSchema.pre('save', async function(next) {
+// ابحث عن هذا الجزء واستبدله بالكود التالي 👇
+
+userSchema.pre('save', async function() { // ❌ حذفنا كلمة next من الأقواس
     const user = this;
-    if (!user.isModified('password') || user.password.length > 50) return next();
+    
+    // إذا لم تتغير كلمة السر، لا تفعل شيئاً
+    if (!user.isModified('password')) return; 
+
     try {
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(user.password, salt);
-        next();
+        // ✅ حذفنا استدعاء next() لأن الدالة async
     } catch (error) {
-        next(error);
+        throw error; // ارمي الخطأ ليمسكه السيرفر
     }
 });
-const User = mongoose.model('User', userSchema);
 
 // --- Order Schema ---
 const orderSchema = new mongoose.Schema({
