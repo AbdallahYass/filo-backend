@@ -97,64 +97,27 @@ const Menu = mongoose.model('Menu', menuSchema);
  * ============================================================
  */
 
-/**
- * ============================================================
- * 3. SERVICES & HELPERS (الخدمات والدوال المساعدة)
- * ============================================================
- */
-
 const sendOTPEmail = async (email, name, otpCode) => {
     const url = "https://api.brevo.com/v3/smtp/email";
     
-    // 🎨 تصميم إيميل احترافي وعصري
+    // تصميم الإيميل (نفس تصميمك السابق)
     const emailDesign = `
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <style>
-            body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; }
-            .email-container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-            .header { background-color: #1A1A1A; padding: 40px 20px; text-align: center; background-image: linear-gradient(135deg, #1A1A1A 0%, #2c2c2c 100%); }
-            .logo-text { color: #C5A028; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; }
-            .content { padding: 40px 30px; text-align: center; color: #333333; }
-            .welcome-text { font-size: 22px; margin-bottom: 10px; color: #1A1A1A; font-weight: bold; }
-            .sub-text { font-size: 16px; color: #666666; margin-bottom: 30px; line-height: 1.6; }
-            .otp-box { background-color: #FFF9E6; border: 2px dashed #C5A028; border-radius: 12px; padding: 20px; display: inline-block; margin: 20px 0; }
-            .otp-code { color: #1A1A1A; font-size: 36px; font-weight: 800; letter-spacing: 8px; font-family: monospace; }
-            .footer { background-color: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999999; border-top: 1px solid #eeeeee; }
-            .note { font-size: 14px; color: #e74c3c; margin-top: 20px; }
-        </style>
-    </head>
-    <body>
-        <div class="email-container">
-            <div class="header">
-                <h1 class="logo-text">FILO MENU</h1>
-            </div>
-            
-            <div class="content">
-                <p class="welcome-text">أهلاً بك يا ${name} 👋</p>
-                <p class="sub-text">
-                    سعداء بانضمامك إلينا! لإكمال عملية التسجيل وتأمين حسابك، يرجى استخدام رمز التحقق أدناه.
-                </p>
-                
-                <div class="otp-box">
-                    <div class="otp-code">${otpCode}</div>
-                </div>
-
-                <p class="sub-text" style="margin-bottom: 0;">
-                    هذا الرمز صالح لمدة <strong style="color: #C5A028;">10 دقائق</strong> فقط.
-                </p>
-                <p class="note">⚠️ لا تشارك هذا الرمز مع أي شخص.</p>
-            </div>
-
-            <div class="footer">
-                <p>&copy; ${new Date().getFullYear()} Filo Menu App. جميع الحقوق محفوظة.</p>
-                <p>تم إرسال هذا البريد تلقائياً، الرجاء عدم الرد.</p>
+    <div style="font-family: 'Arial', sans-serif; max-width: 600px; margin: 0 auto; background-color: #f9f9f9; padding: 20px; border-radius: 10px;">
+        <div style="background-color: #1A1A1A; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: #C5A028; margin: 0; font-size: 24px;">Filo Menu</h1>
+        </div>
+        <div style="background-color: #ffffff; padding: 30px; border-radius: 0 0 10px 10px; text-align: center; border: 1px solid #ddd; border-top: none;">
+            <h2 style="color: #333;">مرحباً بك يا ${name}! 👋</h2>
+            <p style="color: #666; font-size: 16px; line-height: 1.5;">
+                رمز تفعيل حسابك هو:
+            </p>
+            <div style="margin: 30px 0;">
+                <span style="background-color: #C5A028; color: #000; font-size: 32px; font-weight: bold; padding: 10px 30px; border-radius: 5px; letter-spacing: 5px;">
+                    ${otpCode}
+                </span>
             </div>
         </div>
-    </body>
-    </html>
+    </div>
     `;
 
     const options = {
@@ -162,21 +125,25 @@ const sendOTPEmail = async (email, name, otpCode) => {
         headers: {
             "accept": "application/json",
             "content-type": "application/json",
-            "api-key": process.env.BREVO_API_KEY
+            "api-key": process.env.BREVO_API_KEY // 👈 مفتاح الـ API الجديد
         },
         body: JSON.stringify({
             sender: { 
-                name: "Filo Menu Team", 
+                name: "Filo Menu", 
+                // 👇 التغيير هنا: لا تستخدم إيميلك الشخصي كمرسل
+                // استخدم إيميل افتراضي يبدو رسمياً، أو الإيميل الذي نجح معك سابقاً
                 email: "no-reply@filomenu.com" 
             },
             to: [{ email: email, name: name }],
-            subject: "🔐 رمز تفعيل حسابك - Filo Menu",
+            subject: "🔐 رمز تفعيل حسابك",
             htmlContent: emailDesign
         })
     };
 
     try {
+        // نستخدم fetch المدمج في Node.js لإرسال الطلب
         const response = await fetch(url, options);
+        
         if (!response.ok) {
             const errorData = await response.json();
             console.error("❌ فشل إرسال الإيميل (API Error):", JSON.stringify(errorData));
@@ -187,8 +154,6 @@ const sendOTPEmail = async (email, name, otpCode) => {
         console.error("❌ خطأ في الاتصال بخدمة Brevo:", error);
     }
 };
-
-
 /**
  * ============================================================
  * 4. MIDDLEWARES (الطبقات الوسيطة)
