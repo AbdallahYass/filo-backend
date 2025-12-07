@@ -35,67 +35,110 @@ mongoose.connect(MONGO_URI)
  * ============================================================
  */
 
-// --- User Schema ---
+/**
+ * ============================================================
+ * 2. DATABASE MODELS (نماذج قاعدة البيانات - نسخة التوصيل الشاملة)
+ * ============================================================
+ */
+
+// --- User Schema (المستخدم) ---
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true, select: false },
     name: String,
-    role: { type: String, default: 'user', enum: ['user', 'admin'] }, // قمنا بتحديد الأدوار المسموحة
+    role: { type: String, default: 'user', enum: ['user', 'admin'] },
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
     phone: { type: String },
     phoneOtp: String,
-    isPhoneVerified: { type: Boolean, default: false }
+    isPhoneVerified: { type: Boolean, default: false },
+    
+    // 🏠 إضافة: قائمة عناوين المستخدم المحفوظة
+    savedAddresses: [{
+        label: String,       // مثال: "المنزل"، "المكتب"
+        street: String,
+        city: String,
+        location: { lat: Number, lng: Number } // للإحداثيات من الخريطة
+    }]
 });
 
-// ابحث عن هذا الجزء واستبدله بالكود التالي 👇
-
-userSchema.pre('save', async function() { // ❌ حذفنا كلمة next من الأقواس
+// تشفير كلمة المرور
+userSchema.pre('save', async function() {
     const user = this;
-    
-    // إذا لم تتغير كلمة السر، لا تفعل شيئاً
     if (!user.isModified('password')) return; 
 
     try {
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(user.password, salt);
-        // ✅ حذفنا استدعاء next() لأن الدالة async
     } catch (error) {
-        throw error; // ارمي الخطأ ليمسكه السيرفر
+        throw error;
     }
 });
 
 const User = mongoose.model('User', userSchema);
 
-// --- Order Schema ---
-const orderSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    items: Array,
-    totalPrice: Number,
-    date: { type: Date, default: Date.now }, // جعل التاريخ تلقائي
-    tableNumber: String,
-    status: { type: String, default: 'pending', enum: ['pending', 'completed', 'cancelled'] } // إضافة حالة الطلب
-});
-const Order = mongoose.model('Order', orderSchema);
 
-// --- Menu Schema ---
+// --- Menu Schema (المنتجات) ---
 const menuSchema = new mongoose.Schema({
     title: { type: String, required: true }, 
     description: String, 
     price: { type: Number, required: true }, 
     imageUrl: String, 
-    category: { type: String, required: true }
-    // ملاحظة: MongoDB يضيف تلقائياً _id، لا داعي لتعريفه يدوياً
+    category: { type: String, required: true },
+    
+    // 🛍️ إضافة: حالة توفر المنتج (عشان لو خلصت الكمية تخفيه)
+    isAvailable: { type: Boolean, default: true }
 });
 const Menu = mongoose.model('Menu', menuSchema);
 
 
-/**
- * ============================================================
- * 3. SERVICES & HELPERS (الخدمات والدوال المساعدة)
- * ============================================================
- */
+// --- Order Schema (الطلبات - التغيير الجذري) ---
+const orderSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    
+    // تفاصيل الوجبات (Snapshot)
+    items: [{
+        menuId: { type: mongoose.Schema.Types.ObjectId, ref: 'Menu' },
+        title: String,  // نحفظ الاسم عشان لو صاحب المطعم غيره لاحقاً ما يخرب الطلب القديم
+        quantity: Number,
+        price: Number   // نحفظ السعر وقت الطلب
+    }],
+    
+    totalPrice: { type: Number, required: true },
+    
+    // 🚚 نوع الطلب: توصيل، استلام، أو داخل المطعم
+    orderType: { 
+        type: String, 
+        required: true, 
+        enum: ['delivery', 'pickup', 'dine_in'],
+        default: 'delivery'
+    },
+
+    // 📍 تفاصيل التوصيل (مهمة فقط إذا كان delivery)
+    shippingAddress: {
+        street: String,
+        city: String,
+        location: { lat: Number, lng: Number }
+    },
+
+    // 📞 رقم للتواصل بخصوص هذا الطلب تحديداً
+    contactPhone: { type: String },
+
+    // 📦 حالة الطلب (توسعت لتشمل حالات التوصيل)
+    status: { 
+        type: String, 
+        default: 'pending', 
+        enum: ['pending', 'preparing', 'ready_for_pickup', 'out_for_delivery', 'completed', 'cancelled'] 
+    },
+
+    // 💰 رسوم التوصيل
+    deliveryFee: { type: Number, default: 0 },
+
+    date: { type: Date, default: Date.now }
+});
+
+const Order = mongoose.model('Order', orderSchema);
 /**
  * ============================================================
  * 3. SERVICES & HELPERS (الخدمات والدوال المساعدة)
