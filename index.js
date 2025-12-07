@@ -99,10 +99,14 @@ const Menu = mongoose.model('Menu', menuSchema);
 
 const transporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
-    port: 2525, // 👈 غيّرنا المنفذ هنا إلى 2525
-    secure: false, // يبقى false مع هذا المنفذ
-    auth: { user: EMAIL_USER, pass: EMAIL_PASS },
-    tls: { ciphers: 'SSLv3', rejectUnauthorized: false }
+    port: 465,          // 👈 غيّر المنفذ إلى 465
+    secure: true,       // 👈 مهم جداً: يجب أن تكون true مع المنفذ 465
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    },
+    // أحياناً نحتاج هذا السطر لتجاوز مشاكل الشهادات في بيئات التطوير، لكن جرب بدونه أولاً
+    // tls: { rejectUnauthorized: false } 
 });
 
 const sendOTPEmail = async (email, name, otpCode) => {
