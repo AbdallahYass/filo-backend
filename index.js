@@ -66,6 +66,8 @@ userSchema.pre('save', async function() { // ❌ حذفنا كلمة next من �
     }
 });
 
+const User = mongoose.model('User', userSchema);
+
 // --- Order Schema ---
 const orderSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
