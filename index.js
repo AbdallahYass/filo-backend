@@ -19,7 +19,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
-// const EMAIL_USER = process.env.EMAIL_USER; // لم نعد نستخدمه مباشرة مع Brevo API
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
@@ -29,30 +28,31 @@ mongoose.connect(MONGO_URI)
 
 /**
  * ============================================================
- * 2. DATABASE MODELS (نماذج قاعدة البيانات - شاملة)
+ * 2. DATABASE MODELS (نماذج قاعدة البيانات)
  * ============================================================
  */
 
-// --- User Schema (زبون، سائق، تاجر، أدمن) ---
+// --- User Schema ---
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true, select: false },
     name: String,
     
-    // 🎭 الأدوار المتاحة في النظام
+    // 🎭 الأدوار المتاحة
     role: { 
         type: String, 
         default: 'customer', 
         enum: ['customer', 'admin', 'vendor', 'driver'] 
     },
     
+    // تفعيل الإيميل (مهم للأمان)
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
     
-    phone: { type: String }, // 📞 رقم الهاتف
-    phoneOtp: String,
-    isPhoneVerified: { type: Boolean, default: false }, // ✅ حالة تفعيل الهاتف
+    // 📞 رقم الهاتف (بدون تفعيل، حفظ مباشر)
+    phone: { type: String }, 
+    isPhoneVerified: { type: Boolean, default: false }, // يصير True تلقائياً عند الحفظ
 
     // 🏠 عناوين الزبون
     savedAddresses: [{
@@ -62,7 +62,7 @@ const userSchema = new mongoose.Schema({
         location: { lat: Number, lng: Number }
     }],
 
-    // 🛵 بيانات السائق (تستخدم فقط إذا كان الدور driver)
+    // 🛵 بيانات السائق
     driverStatus: {
         isOnline: { type: Boolean, default: false },
         currentLocation: { lat: Number, lng: Number },
@@ -70,7 +70,7 @@ const userSchema = new mongoose.Schema({
         licensePlate: String
     },
 
-    // 🏪 بيانات المتجر (تستخدم فقط إذا كان الدور vendor)
+    // 🏪 بيانات المتجر
     storeInfo: {
         storeName: String,
         description: String,
@@ -90,11 +90,9 @@ userSchema.pre('save', async function() {
 const User = mongoose.model('User', userSchema);
 
 
-// --- Menu Schema (المنتجات) ---
+// --- Menu Schema ---
 const menuSchema = new mongoose.Schema({
-    // 🔗 ربط المنتج بصاحب المتجر (Vendor) - جعلناها اختيارية مؤقتاً للأدمن
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, 
-
     title: { type: String, required: true }, 
     description: String, 
     price: { type: Number, required: true }, 
@@ -105,14 +103,10 @@ const menuSchema = new mongoose.Schema({
 const Menu = mongoose.model('Menu', menuSchema);
 
 
-// --- Order Schema (الطلبات ودورة التوصيل) ---
+// --- Order Schema ---
 const orderSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // الزبون
-    
-    // 🔗 المتجر المسؤول عن الطلب (اختياري حالياً حتى نجهز تطبيق المتاجر)
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-
-    // 🛵 السائق المسؤول (يضاف لاحقاً عند قبول الطلب)
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
     items: [{
@@ -132,19 +126,10 @@ const orderSchema = new mongoose.Schema({
     },
     contactPhone: { type: String },
     
-    // 🚦 حالات الطلب الكاملة
     status: { 
         type: String, 
         default: 'pending', 
-        enum: [
-            'pending',          // بانتظار موافقة المتجر
-            'accepted',         // المتجر وافق وجاري التحضير
-            'ready_for_pickup', // جاهز، بانتظار سائق
-            'picked_up',        // السائق استلمه
-            'out_for_delivery', // في الطريق
-            'completed',        // وصل للزبون
-            'cancelled'         // ملغي
-        ] 
+        enum: ['pending', 'accepted', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'completed', 'cancelled'] 
     },
 
     deliveryFee: { type: Number, default: 0 },
@@ -155,7 +140,7 @@ const Order = mongoose.model('Order', orderSchema);
 
 /**
  * ============================================================
- * 3. SERVICES (خدمات الإيميل وغيرها)
+ * 3. SERVICES (خدمات الإيميل فقط)
  * ============================================================
  */
 const sendOTPEmail = async (email, name, otpCode) => {
@@ -244,9 +229,7 @@ const authMiddleware = (req, res, next) => {
     }
 };
 
-// التحقق من الصلاحيات (Role-Based Access Control)
 const checkRole = (allowedRoles) => (req, res, next) => {
-    // نسمح بإدخال مصفوفة أدوار، مثلاً ['admin', 'vendor']
     const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
     if (req.userData && roles.includes(req.userData.role)) {
         next();
@@ -269,17 +252,15 @@ app.use('/api', authMiddleware);
 
 app.get('/', (req, res) => res.send('Filo Super-App Server is Live! 🚀'));
 
-// --- AUTH (التسجيل والدخول) ---
+
+// ================= AUTH ROUTES =================
 
 app.post('/api/auth/register', async (req, res) => {
-    // 🛠️ التحديث: استقبال الهاتف والدور من التطبيق
     const { email, password, name, phone, role } = req.body;
     try {
         let user = await User.findOne({ email });
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         const otpExpiry = Date.now() + 10 * 60 * 1000;
-
-        // الدور الافتراضي customer إذا لم يرسله التطبيق
         const userRole = role || 'customer'; 
 
         if (user) {
@@ -289,18 +270,18 @@ app.post('/api/auth/register', async (req, res) => {
             user.otp = otpCode; 
             user.otpExpires = otpExpiry; 
             user.role = userRole; 
-            user.phone = phone; // ✅ تحديث الهاتف
+            user.phone = phone; 
+            // ✅ إذا أدخل رقم هاتف، نعتبره مفعل تلقائياً
+            if(phone) user.isPhoneVerified = true; 
             await user.save();
         } else {
             user = new User({ 
-                email, 
-                password, 
-                name, 
-                phone, // ✅ حفظ الهاتف
+                email, password, name, phone, 
                 role: userRole, 
                 isVerified: false, 
-                otp: otpCode, 
-                otpExpires: otpExpiry 
+                otp: otpCode, otpExpires: otpExpiry,
+                // ✅ إذا أدخل رقم هاتف، نعتبره مفعل تلقائياً
+                isPhoneVerified: !!phone 
             });
             await user.save();
         }
@@ -327,76 +308,48 @@ app.post('/api/auth/login', async (req, res) => {
         if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "Wrong Credentials" });
         if (!user.isVerified) return res.status(403).json({ error: "NOT_VERIFIED" });
         
-        // 🚧 يمكن تفعيل هذا السطر لاحقاً لإجبار تفعيل الهاتف
-        // if (!user.isPhoneVerified) return res.status(403).json({ error: "PHONE_NOT_VERIFIED" });
-
-        const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '30d' }); // مدة طويلة
+        const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
         user.password = undefined;
         res.json({ message: "Logged In", token, user });
     } catch (error) { res.status(500).json({ error: "Error" }); }
 });
 
-
-// --- Google Auth Route (New) ---
+// --- Google Auth Route ---
 app.post('/api/auth/google', async (req, res) => {
     const { accessToken } = req.body;
-
-    if (!accessToken) {
-        return res.status(400).json({ error: "Access token is required" });
-    }
+    if (!accessToken) return res.status(400).json({ error: "Access token is required" });
 
     try {
-        // 1. التحقق من التوكن وجلب بيانات المستخدم من جوجل
         const googleResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
 
-        if (!googleResponse.ok) {
-            return res.status(400).json({ error: "Invalid Google Token" });
-        }
+        if (!googleResponse.ok) return res.status(400).json({ error: "Invalid Google Token" });
 
         const googleData = await googleResponse.json();
-        const { email, name, sub, picture } = googleData; // sub هو الـ Google ID
+        const { email, name } = googleData;
 
-        // 2. البحث عن المستخدم في الداتابيز
         let user = await User.findOne({ email });
 
-        if (user) {
-            // --- المستخدم موجود مسبقاً ---
-            
-            // تحديث الاسم أو الصورة إذا حبيت (اختياري)
-            // user.name = name;
-            // await user.save();
-
-        } else {
-            // --- مستخدم جديد (أول مرة) ---
-            
-            // ملاحظة: بما أن الباسوورد مطلوب في الموديل، بنعمل باسوورد عشوائي قوي
-            // المستخدم ما رح يستخدمه، رح يدخل دائماً عبر جوجل
+        if (!user) {
             const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
-
             user = new User({
                 email: email,
                 name: name,
-                password: randomPassword, // سيتم تشفيره تلقائياً عبر الـ Pre-save hook
-                role: 'customer', // الدور الافتراضي
-                isVerified: true, // جوجل يعتبر جهة موثوقة، فالحساب مفعل
-                isPhoneVerified: false, // لا يزال يحتاج تفعيل رقم الهاتف لاحقاً
-                // يمكن حفظ الصورة إذا عدلت الموديل لاحقاً
-                // photoUrl: picture 
+                password: randomPassword,
+                role: 'customer',
+                isVerified: true,
+                isPhoneVerified: false // سنطلب منه الرقم لاحقاً
             });
-
             await user.save();
         }
 
-        // 3. إنشاء التوكن الخاص بسيرفرنا (JWT)
         const token = jwt.sign(
             { userId: user._id, role: user.role }, 
             JWT_SECRET, 
             { expiresIn: '30d' }
         );
 
-        // 4. إرسال الرد للتطبيق
         res.status(200).json({
             message: "Google Login Success",
             token: token,
@@ -405,7 +358,8 @@ app.post('/api/auth/google', async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                isVerified: user.isVerified
+                isVerified: user.isVerified,
+                phone: user.phone
             }
         });
 
@@ -414,94 +368,70 @@ app.post('/api/auth/google', async (req, res) => {
         res.status(500).json({ error: "Internal Server Error during Google Auth" });
     }
 });
-// --- Forgot Password Flow ---
 
-// 1. طلب إعادة تعيين كلمة المرور (إرسال الكود)
+// --- Forgot Password Flow ---
 app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(404).json({ error: "Email not found" });
 
-        // إنشاء كود جديد
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         user.otp = otpCode;
-        user.otpExpires = Date.now() + 10 * 60 * 1000; // 10 دقائق
+        user.otpExpires = Date.now() + 10 * 60 * 1000;
         await user.save();
 
-        // إرسال الإيميل (تعديل الرسالة لتكون مناسبة للريسيت)
         await sendOTPEmail(email, user.name || "User", otpCode);
-
         res.json({ message: "OTP sent to email" });
-    } catch (error) {
-        res.status(500).json({ error: "Server Error" });
-    }
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-// 2. تعيين كلمة المرور الجديدة
 app.post('/api/auth/reset-password', async (req, res) => {
     const { email, otp, newPassword } = req.body;
     try {
         const user = await User.findOne({ email });
         if (!user) return res.status(404).json({ error: "User not found" });
 
-        // التحقق من الكود والوقت
         if (user.otp !== otp || user.otpExpires < Date.now()) {
             return res.status(400).json({ error: "Invalid or Expired OTP" });
         }
 
-        // تحديث كلمة المرور
-        user.password = newPassword; // الـ Hook في الموديل رح يشفرها تلقائياً
-        user.otp = undefined; // حذف الكود
+        user.password = newPassword;
+        user.otp = undefined;
         user.otpExpires = undefined;
-        
-        // مهم جداً: إذا كان الحساب غير مفعل، نفعله بالمرة
         if (!user.isVerified) user.isVerified = true;
 
         await user.save();
-
         res.json({ message: "Password updated successfully" });
-    } catch (error) {
-        console.log(error);
-        res.status(500).json({ error: "Server Error" });
-    }
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
-// إرسال كود الهاتف (وهمي حالياً لعدم وجود اشتراك SMS)
-app.post('/api/auth/phone/send', async (req, res) => {
-    const { email, phone } = req.body;
-    // هنا المفروض نربط مع خدمة مثل Twilio
-    // حالياً سنقوم "بتمثيل" النجاح
-    console.log(`📲 [MOCK SMS] Sending code to ${phone} for user ${email}`);
-    res.status(200).json({ message: "SMS sent (Mock)" });
-});
-// التحقق من كود الهاتف
-app.post('/api/auth/phone/verify', async (req, res) => {
-    const { email, otp } = req.body;
+
+
+// 🔥 تحديث رقم الهاتف (حفظ مباشر بدون كود) 🔥
+app.post('/api/user/update-phone', authMiddleware, async (req, res) => {
+    const { phone } = req.body;
+    
+    if (!phone) return res.status(400).json({ error: "Phone is required" });
+
     try {
-        const user = await User.findOne({ email });
-        if(!user) return res.status(404).json({error: "User not found"});
+        // تحديث الهاتف + تفعيله فوراً
+        await User.findByIdAndUpdate(req.userData.userId, { 
+            phone: phone,
+            isPhoneVerified: true 
+        });
         
-        // للتبسيط في التجربة: أي كود "123456" سنعتبره صحيحاً
-        // أو يمكنك حفظ الكود في الداتابيز ومقارنته مثل الإيميل
-        if (otp === "123456") {
-            user.isPhoneVerified = true;
-            await user.save();
-            res.status(200).json({ message: "Phone Verified!" });
-        } else {
-            res.status(400).json({ error: "Invalid SMS Code" });
-        }
+        res.json({ message: "Phone saved successfully" });
     } catch (error) {
         res.status(500).json({ error: "Server Error" });
     }
 });
 
 
-// --- MENU (للمتاجر) ---
-// 🛠️ التحديث: السماح للمتاجر والأدمن بالإضافة
+// ================= MENU & ORDERS =================
+
 app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
     try {
         const mealData = { ...req.body };
-        // إذا كان الفاعل متجر، نربط الوجبة به تلقائياً
         if (req.userData.role === 'vendor') {
             mealData.vendorId = req.userData.userId;
         }
@@ -520,7 +450,6 @@ app.get('/api/menu', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
 });
 
-// --- ORDERS (الطلبات) ---
 app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order({ ...req.body, userId: req.userData.userId });
@@ -532,7 +461,6 @@ app.post('/api/orders', async (req, res) => {
 app.get('/api/orders', async (req, res) => {
     try {
         let filter = {};
-        // 🛠️ التحديث: منطق العرض حسب الدور
         if (req.userData.role === 'customer') {
             filter = { userId: req.userData.userId };
         } else if (req.userData.role === 'vendor') {
@@ -540,8 +468,8 @@ app.get('/api/orders', async (req, res) => {
         } else if (req.userData.role === 'driver') {
             filter = { 
                 $or: [
-                    { driverId: req.userData.userId }, // طلباته
-                    { status: 'ready_for_pickup', driverId: { $exists: false } } // طلبات متاحة
+                    { driverId: req.userData.userId }, 
+                    { status: 'ready_for_pickup', driverId: { $exists: false } } 
                 ]
             };
         }
