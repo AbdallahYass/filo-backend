@@ -347,6 +347,7 @@ app.post('/api/auth/phone/send', async (req, res) => {
     res.status(200).json({ message: "SMS sent (Mock)" });
 });
 
+
 // التحقق من كود الهاتف
 app.post('/api/auth/phone/verify', async (req, res) => {
     const { email, otp } = req.body;
