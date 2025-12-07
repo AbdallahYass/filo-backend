@@ -129,8 +129,10 @@ const sendOTPEmail = async (email, name, otpCode) => {
         },
         body: JSON.stringify({
             sender: { 
-                name: "Filo Menu Support", 
-                email: process.env.EMAIL_USER // ⚠️ يجب أن يكون هذا الإيميل مفعلاً كمرسل في Brevo
+                name: "Filo Menu", 
+                // 👇 التغيير هنا: لا تستخدم إيميلك الشخصي كمرسل
+                // استخدم إيميل افتراضي يبدو رسمياً، أو الإيميل الذي نجح معك سابقاً
+                email: "no-reply@filomenu.com" 
             },
             to: [{ email: email, name: name }],
             subject: "🔐 رمز تفعيل حسابك",
