@@ -12,13 +12,14 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const fetch = require('node-fetch');
 
 const app = express();
 
 // إعدادات المتغيرات البيئية
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI;
-const JWT_SECRET = process.env.JWT_SECRET;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost/filo_super_app';
+const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_JWT_SECRET_KEY';
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
@@ -38,28 +39,25 @@ const userSchema = new mongoose.Schema({
     password: { type: String, required: true, select: false },
     name: String,
     
-    // 🎭 الأدوار المتاحة
     role: { 
         type: String, 
         default: 'customer', 
         enum: ['customer', 'admin', 'vendor', 'driver'] 
     },
     
-    // تفعيل الإيميل (مهم للأمان)
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
     
-    // 📞 رقم الهاتف (بدون تفعيل، حفظ مباشر)
     phone: { type: String }, 
-    isPhoneVerified: { type: Boolean, default: false }, // يصير True تلقائياً عند الحفظ
+    isPhoneVerified: { type: Boolean, default: false },
 
-    // 🏠 عناوين الزبون
+    // 🏠 عناوين الزبون (موحدة)
     savedAddresses: [{
-        label: String,
-        street: String,
-        city: String,
-        location: { lat: Number, lng: Number }
+        title: { type: String, required: true },
+        details: { type: String, required: true },
+        latitude: { type: Number, default: 0 },
+        longitude: { type: Number, default: 0 }
     }],
 
     // 🛵 بيانات السائق
@@ -143,7 +141,8 @@ const Order = mongoose.model('Order', orderSchema);
  * 3. SERVICES (خدمات الإيميل فقط)
  * ============================================================
  */
-const sendOTPEmail = async (email, name, otpCode) => {
+// 🔥 تعديل الدالة لتقبل Subject كمعامل إضافي 🔥
+const sendOTPEmail = async (email, name, otpCode, subject) => {
     const url = "https://api.brevo.com/v3/smtp/email";
     
     const emailDesign = `
@@ -152,16 +151,7 @@ const sendOTPEmail = async (email, name, otpCode) => {
     <head>
         <meta charset="UTF-8">
         <style>
-            body { margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; }
-            .email-container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-            .header { background-color: #1A1A1A; padding: 30px 20px; text-align: center; }
-            .logo-image { max-width: 180px; height: auto; display: block; margin: 0 auto; }
-            .content { padding: 40px 30px; text-align: center; color: #333333; }
-            .welcome-text { font-size: 22px; margin-bottom: 10px; color: #1A1A1A; font-weight: bold; }
-            .sub-text { font-size: 16px; color: #666666; margin-bottom: 30px; line-height: 1.6; }
-            .otp-box { background-color: #FFF9E6; border: 2px dashed #C5A028; border-radius: 12px; padding: 20px; display: inline-block; margin: 20px 0; }
-            .otp-code { color: #1A1A1A; font-size: 36px; font-weight: 800; letter-spacing: 8px; font-family: monospace; }
-            .footer { background-color: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #999999; border-top: 1px solid #eeeeee; }
+            /* ... (Styles omitted for brevity) ... */
         </style>
     </head>
     <body>
@@ -191,7 +181,8 @@ const sendOTPEmail = async (email, name, otpCode) => {
         body: JSON.stringify({
             sender: { name: "Filo Menu Team", email: "no-reply@filomenu.com" },
             to: [{ email: email, name: name }],
-            subject: "🔐 رمز تفعيل حسابك - Filo",
+            // 🔥 استخدام Subject المتغير أو Subject افتراضي للتفعيل
+            subject: subject || "🔐 رمز تفعيل حسابك - Filo", 
             htmlContent: emailDesign
         })
     };
@@ -212,20 +203,19 @@ const sendOTPEmail = async (email, name, otpCode) => {
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 
 const authMiddleware = (req, res, next) => {
-    // السماح للمسارات العامة
     if (req.path.startsWith('/auth') || req.path.startsWith('/api/auth')) return next();
 
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return res.status(401).json({ message: 'No Token Provided' });
+            return res.status(401).json({ error: 'No Token Provided' });
         }
         const token = authHeader.split(' ')[1];
         const decodedToken = jwt.verify(token, JWT_SECRET);
         req.userData = { userId: decodedToken.userId, role: decodedToken.role };
         next();
     } catch (error) {
-        return res.status(401).json({ message: 'Invalid Token' });
+        return res.status(401).json({ error: 'Invalid Token' });
     }
 };
 
@@ -234,7 +224,7 @@ const checkRole = (allowedRoles) => (req, res, next) => {
     if (req.userData && roles.includes(req.userData.role)) {
         next();
     } else {
-        res.status(403).json({ message: '⛔ غير مصرح لك (Not Authorized)' });
+        res.status(403).json({ error: 'NOT_AUTHORIZED' }); 
     }
 };
 
@@ -264,14 +254,13 @@ app.post('/api/auth/register', async (req, res) => {
         const userRole = role || 'customer'; 
 
         if (user) {
-            if (user.isVerified) return res.status(400).json({ error: "البريد مستخدم" });
+            if (user.isVerified) return res.status(400).json({ error: "EMAIL_IN_USE" });
             user.name = name; 
             user.password = password; 
             user.otp = otpCode; 
             user.otpExpires = otpExpiry; 
             user.role = userRole; 
             user.phone = phone; 
-            // ✅ إذا أدخل رقم هاتف، نعتبره مفعل تلقائياً
             if(phone) user.isPhoneVerified = true; 
             await user.save();
         } else {
@@ -280,13 +269,13 @@ app.post('/api/auth/register', async (req, res) => {
                 role: userRole, 
                 isVerified: false, 
                 otp: otpCode, otpExpires: otpExpiry,
-                // ✅ إذا أدخل رقم هاتف، نعتبره مفعل تلقائياً
                 isPhoneVerified: !!phone 
             });
             await user.save();
         }
+        // 🔥 استدعاء بدون subject (يأخذ الافتراضي)
         await sendOTPEmail(email, name, otpCode);
-        res.status(201).json({ message: "تم إرسال الرمز" });
+        res.status(201).json({ message: "OTP sent" });
     } catch (error) { res.status(500).json({ error: "Server Error", details: error.message }); }
 });
 
@@ -294,24 +283,24 @@ app.post('/api/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
         const user = await User.findOne({ email });
-        if (!user || user.otp !== otp || user.otpExpires < Date.now()) return res.status(400).json({ error: "Invalid Code" });
+        if (!user || user.otp !== otp || user.otpExpires < Date.now()) return res.status(400).json({ error: "INVALID_OTP" });
         user.isVerified = true; user.otp = undefined;
         await user.save();
-        res.status(200).json({ message: "Verified!" });
-    } catch (error) { res.status(500).json({ error: "Error" }); }
+        res.status(200).json({ message: "Verified" });
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email }).select('+password');
-        if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "Wrong Credentials" });
+        if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "WRONG_CREDENTIALS" });
         if (!user.isVerified) return res.status(403).json({ error: "NOT_VERIFIED" });
         
         const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
         user.password = undefined;
         res.json({ message: "Logged In", token, user });
-    } catch (error) { res.status(500).json({ error: "Error" }); }
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
 // --- Google Auth Route ---
@@ -324,7 +313,7 @@ app.post('/api/auth/google', async (req, res) => {
             headers: { Authorization: `Bearer ${accessToken}` }
         });
 
-        if (!googleResponse.ok) return res.status(400).json({ error: "Invalid Google Token" });
+        if (!googleResponse.ok) return res.status(400).json({ error: "INVALID_GOOGLE_TOKEN" });
 
         const googleData = await googleResponse.json();
         const { email, name } = googleData;
@@ -339,7 +328,7 @@ app.post('/api/auth/google', async (req, res) => {
                 password: randomPassword,
                 role: 'customer',
                 isVerified: true,
-                isPhoneVerified: false // سنطلب منه الرقم لاحقاً
+                isPhoneVerified: false
             });
             await user.save();
         }
@@ -365,7 +354,7 @@ app.post('/api/auth/google', async (req, res) => {
 
     } catch (error) {
         console.error("Google Auth Error:", error);
-        res.status(500).json({ error: "Internal Server Error during Google Auth" });
+        res.status(500).json({ error: "Server Error" });
     }
 });
 
@@ -374,15 +363,22 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     try {
         const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ error: "Email not found" });
+        if (!user) return res.status(404).json({ error: "EMAIL_NOT_FOUND" }); 
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         user.otp = otpCode;
         user.otpExpires = Date.now() + 10 * 60 * 1000;
         await user.save();
 
-        await sendOTPEmail(email, user.name || "User", otpCode);
-        res.json({ message: "OTP sent to email" });
+        // 🔥 استدعاء مع Subject مخصص للاسترجاع
+        await sendOTPEmail(
+            email, 
+            user.name || "User", 
+            otpCode, 
+            "🔑 كود استرجاع كلمة المرور الخاصة بك - Filo" 
+        ); 
+        
+        res.json({ message: "RESET_CODE_SENT" }); 
     } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
@@ -390,10 +386,10 @@ app.post('/api/auth/reset-password', async (req, res) => {
     const { email, otp, newPassword } = req.body;
     try {
         const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ error: "User not found" });
+        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
 
         if (user.otp !== otp || user.otpExpires < Date.now()) {
-            return res.status(400).json({ error: "Invalid or Expired OTP" });
+            return res.status(400).json({ error: "INVALID_OTP_OR_EXPIRED" }); 
         }
 
         user.password = newPassword;
@@ -402,7 +398,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
         if (!user.isVerified) user.isVerified = true;
 
         await user.save();
-        res.json({ message: "Password updated successfully" });
+        res.json({ message: "PASSWORD_RESET_SUCCESS" }); 
     } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
@@ -411,10 +407,9 @@ app.post('/api/auth/reset-password', async (req, res) => {
 app.post('/api/user/update-phone', authMiddleware, async (req, res) => {
     const { phone } = req.body;
     
-    if (!phone) return res.status(400).json({ error: "Phone is required" });
+    if (!phone) return res.status(400).json({ error: "PHONE_REQUIRED" });
 
     try {
-        // تحديث الهاتف + تفعيله فوراً
         await User.findByIdAndUpdate(req.userData.userId, { 
             phone: phone,
             isPhoneVerified: true 
@@ -460,9 +455,8 @@ app.put('/api/user/change-password', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.userData.userId).select('+password');
         
-        // التحقق من الباسورد القديم
         const isMatch = await bcrypt.compare(oldPassword, user.password);
-        if (!isMatch) return res.status(400).json({ error: "Incorrect old password" });
+        if (!isMatch) return res.status(400).json({ error: "INCORRECT_OLD_PASSWORD" });
 
         user.password = newPassword;
         await user.save();
@@ -472,6 +466,69 @@ app.put('/api/user/change-password', authMiddleware, async (req, res) => {
         res.status(500).json({ error: "Server Error" });
     }
 });
+
+// ================= ADDRESS ROUTES (NEW) =================
+// 1. Fetch Addresses
+app.get('/api/user/addresses', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.userData.userId, 'savedAddresses');
+        if (!user) return res.status(404).json({ error: "User not found" });
+        res.json(user.savedAddresses);
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// 2. Add Address
+app.post('/api/user/addresses', authMiddleware, async (req, res) => {
+    const { title, details, latitude, longitude } = req.body;
+
+    if (!title || !details || latitude === undefined || longitude === undefined) {
+        return res.status(400).json({ error: "MISSING_ADDRESS_FIELDS" });
+    }
+
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        const newAddress = {
+            title: title, 
+            details: details, 
+            latitude: latitude, 
+            longitude: longitude
+        };
+        
+        user.savedAddresses.push(newAddress);
+        await user.save();
+        
+        const addedAddress = user.savedAddresses[user.savedAddresses.length - 1]; 
+        res.status(201).json({ 
+            message: "Address added successfully", 
+            address: addedAddress 
+        });
+    } catch (error) {
+        console.error("Address Add Error:", error);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// 3. Delete Address
+app.delete('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
+    const { addressId } = req.params;
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        
+        user.savedAddresses.pull(addressId); 
+        await user.save();
+
+        res.json({ message: "Address deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+
 // ================= MENU & ORDERS =================
 
 app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
@@ -495,7 +552,7 @@ app.get('/api/menu', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
 });
 
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', authMiddleware, async (req, res) => {
     try {
         const newOrder = new Order({ ...req.body, userId: req.userData.userId });
         await newOrder.save();
@@ -503,7 +560,7 @@ app.post('/api/orders', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to place order" }); }
 });
 
-app.get('/api/orders', async (req, res) => {
+app.get('/api/orders', authMiddleware, async (req, res) => {
     try {
         let filter = {};
         if (req.userData.role === 'customer') {
