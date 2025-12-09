@@ -511,8 +511,48 @@ app.post('/api/user/addresses', authMiddleware, async (req, res) => {
         res.status(500).json({ error: "Server Error" });
     }
 });
+// 2. updated Address
+ app.put('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
+    const { addressId } = req.params;
+    const { title, details, latitude, longitude } = req.body;
 
-// 3. Delete Address
+    if (!title || !details || latitude === undefined || longitude === undefined) {
+        return res.status(400).json({ error: "MISSING_ADDRESS_FIELDS" });
+    }
+
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
+
+        // 1. العثور على فهرس (Index) العنوان المراد تعديله
+        const addressIndex = user.savedAddresses.findIndex(
+            addr => addr._id.toString() === addressId
+        );
+
+        if (addressIndex === -1) {
+            return res.status(404).json({ error: "ADDRESS_NOT_FOUND" });
+        }
+
+        // 2. تحديث البيانات مباشرة في المخطط الفرعي (Subdocument)
+        user.savedAddresses[addressIndex].title = title;
+        user.savedAddresses[addressIndex].details = details;
+        user.savedAddresses[addressIndex].latitude = latitude;
+        user.savedAddresses[addressIndex].longitude = longitude;
+
+        await user.save();
+
+        res.status(200).json({ 
+            message: "Address updated successfully",
+            address: user.savedAddresses[addressIndex]
+        });
+
+    } catch (error) {
+        console.error("Address Update Error:", error);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+// 4. Delete Address
 app.delete('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
     const { addressId } = req.params;
     try {
