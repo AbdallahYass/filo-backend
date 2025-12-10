@@ -135,6 +135,18 @@ const orderSchema = new mongoose.Schema({
 });
 const Order = mongoose.model('Order', orderSchema);
 
+// 🔥🔥 Category Schema (مخطط الفئات الجديدة) 🔥🔥
+const categorySchema = new mongoose.Schema({
+    name: { type: String, required: true, unique: true },
+    key: { type: String, required: true, unique: true, lowercase: true },
+    icon: { type: String }, // لتخزين اسم أيقونة (مثلاً 'restaurant')
+    description: String,
+    isAvailable: { type: Boolean, default: true }
+});
+
+const Category = mongoose.model('Category', categorySchema);
+// ----------------------------------------------------------------
+
 
 /**
  * ============================================================
@@ -511,114 +523,157 @@ app.post('/api/user/addresses', authMiddleware, async (req, res) => {
         res.status(500).json({ error: "Server Error" });
     }
 });
-// 2. updated Address
- app.put('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
-    const { addressId } = req.params;
-    const { title, details, latitude, longitude } = req.body;
+// 3. updated Address
+app.put('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
+  const { addressId } = req.params;
+  const { title, details, latitude, longitude } = req.body;
 
-    if (!title || !details || latitude === undefined || longitude === undefined) {
-        return res.status(400).json({ error: "MISSING_ADDRESS_FIELDS" });
+  if (!title || !details || latitude === undefined || longitude === undefined) {
+    return res.status(400).json({ error: "MISSING_ADDRESS_FIELDS" });
+  }
+
+  try {
+    const user = await User.findById(req.userData.userId);
+    if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
+
+    // 1. العثور على فهرس (Index) العنوان المراد تعديله
+    const addressIndex = user.savedAddresses.findIndex(
+      addr => addr._id.toString() === addressId
+    );
+
+    if (addressIndex === -1) {
+      return res.status(404).json({ error: "ADDRESS_NOT_FOUND" });
     }
 
-    try {
-        const user = await User.findById(req.userData.userId);
-        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
+    // 2. تحديث البيانات مباشرة في المخطط الفرعي (Subdocument)
+    user.savedAddresses[addressIndex].title = title;
+    user.savedAddresses[addressIndex].details = details;
+    user.savedAddresses[addressIndex].latitude = latitude;
+    user.savedAddresses[addressIndex].longitude = longitude;
 
-        // 1. العثور على فهرس (Index) العنوان المراد تعديله
-        const addressIndex = user.savedAddresses.findIndex(
-            addr => addr._id.toString() === addressId
-        );
+    await user.save();
 
-        if (addressIndex === -1) {
-            return res.status(404).json({ error: "ADDRESS_NOT_FOUND" });
-        }
+    res.status(200).json({ 
+      message: "Address updated successfully",
+      address: user.savedAddresses[addressIndex]
+    });
 
-        // 2. تحديث البيانات مباشرة في المخطط الفرعي (Subdocument)
-        user.savedAddresses[addressIndex].title = title;
-        user.savedAddresses[addressIndex].details = details;
-        user.savedAddresses[addressIndex].latitude = latitude;
-        user.savedAddresses[addressIndex].longitude = longitude;
-
-        await user.save();
-
-        res.status(200).json({ 
-            message: "Address updated successfully",
-            address: user.savedAddresses[addressIndex]
-        });
-
-    } catch (error) {
-        console.error("Address Update Error:", error);
-        res.status(500).json({ error: "Server Error" });
-    }
+  } catch (error) {
+    console.error("Address Update Error:", error);
+    res.status(500).json({ error: "Server Error" });
+  }
 });
 
 // 4. Delete Address
 app.delete('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
-    const { addressId } = req.params;
-    try {
-        const user = await User.findById(req.userData.userId);
-        if (!user) return res.status(404).json({ error: "User not found" });
-        
-        user.savedAddresses.pull(addressId); 
-        await user.save();
+  const { addressId } = req.params;
+  try {
+    const user = await User.findById(req.userData.userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    
+    user.savedAddresses.pull(addressId); 
+    await user.save();
 
-        res.json({ message: "Address deleted successfully" });
+    res.json({ message: "Address deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: "Server Error" });
+  }
+});
+
+// ================= CATEGORIES ROUTES (جديد) =================
+
+// 1. جلب جميع الفئات (متاحة للجميع)
+app.get('/api/categories', async (req, res) => {
+    try {
+        const categories = await Category.find({ isAvailable: true }).sort({ name: 1 });
+        res.json(categories);
     } catch (error) {
         res.status(500).json({ error: "Server Error" });
     }
 });
 
+// 2. إضافة فئة جديدة (للمسؤولين فقط)
+app.post('/api/categories', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        const { name, key, icon, description } = req.body;
+        if (!name || !key || !icon) {
+            return res.status(400).json({ error: "MISSING_CATEGORY_FIELDS" });
+        }
+        
+        const newCategory = new Category({ name, key, icon, description });
+        await newCategory.save();
+        res.status(201).json({ message: "Category added successfully", category: newCategory });
+        
+    } catch (error) {
+        if (error.code === 11000) { // MongoDB duplicate key error
+            return res.status(409).json({ error: "CATEGORY_KEY_EXISTS" });
+        }
+        res.status(500).json({ error: "Server Error" });
+    }
+});
 
+// 3. حذف فئة (للمسؤولين فقط)
+app.delete('/api/categories/:categoryId', authMiddleware, checkRole(['admin']), async (req, res) => {
+    try {
+        const result = await Category.findByIdAndDelete(req.params.categoryId);
+        if (!result) {
+            return res.status(404).json({ error: "CATEGORY_NOT_FOUND" });
+        }
+        res.json({ message: "Category deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
 // ================= MENU & ORDERS =================
 
 app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
-    try {
-        const mealData = { ...req.body };
-        if (req.userData.role === 'vendor') {
-            mealData.vendorId = req.userData.userId;
-        }
-        const newMeal = new Menu(mealData);
-        await newMeal.save();
-        res.status(201).json({ message: "Item Added", meal: newMeal });
-    } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
+  try {
+    const mealData = { ...req.body };
+    if (req.userData.role === 'vendor') {
+      mealData.vendorId = req.userData.userId;
+    }
+    const newMeal = new Menu(mealData);
+    await newMeal.save();
+    res.status(201).json({ message: "Item Added", meal: newMeal });
+  } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
 });
 
 app.get('/api/menu', async (req, res) => {
-    const { vendorId } = req.query;
-    const filter = vendorId ? { vendorId } : {};
-    try {
-        const menu = await Menu.find(filter);
-        res.json(menu);
-    } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
+  const { vendorId } = req.query;
+  const filter = vendorId ? { vendorId } : {};
+  try {
+    const menu = await Menu.find(filter);
+    res.json(menu);
+  } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
 });
 
 app.post('/api/orders', authMiddleware, async (req, res) => {
-    try {
-        const newOrder = new Order({ ...req.body, userId: req.userData.userId });
-        await newOrder.save();
-        res.status(201).json({ message: "Order Placed", order: newOrder });
-    } catch (error) { res.status(500).json({ error: "Failed to place order" }); }
+  try {
+    const newOrder = new Order({ ...req.body, userId: req.userData.userId });
+    await newOrder.save();
+    res.status(201).json({ message: "Order Placed", order: newOrder });
+  } catch (error) { res.status(500).json({ error: "Failed to place order" }); }
 });
 
 app.get('/api/orders', authMiddleware, async (req, res) => {
-    try {
-        let filter = {};
-        if (req.userData.role === 'customer') {
-            filter = { userId: req.userData.userId };
-        } else if (req.userData.role === 'vendor') {
-            filter = { vendorId: req.userData.userId };
-        } else if (req.userData.role === 'driver') {
-            filter = { 
-                $or: [
-                    { driverId: req.userData.userId }, 
-                    { status: 'ready_for_pickup', driverId: { $exists: false } } 
-                ]
-            };
-        }
-        
-        const orders = await Order.find(filter).populate('userId', 'name phone').sort({ date: -1 });
-        res.json(orders);
-    } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
+  try {
+    let filter = {};
+    if (req.userData.role === 'customer') {
+      filter = { userId: req.userData.userId };
+    } else if (req.userData.role === 'vendor') {
+      filter = { vendorId: req.userData.userId };
+    } else if (req.userData.role === 'driver') {
+      filter = { 
+        $or: [
+          { driverId: req.userData.userId }, 
+          { status: 'ready_for_pickup', driverId: { $exists: false } } 
+        ]
+      };
+    }
+    
+    const orders = await Order.find(filter).populate('userId', 'name phone').sort({ date: -1 });
+    res.json(orders);
+  } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
 });
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
