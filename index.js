@@ -137,9 +137,14 @@ const Order = mongoose.model('Order', orderSchema);
 
 // 🔥🔥 Category Schema (مخطط الفئات الجديدة) 🔥🔥
 const categorySchema = new mongoose.Schema({
-    name: { type: String, required: true, unique: true },
-    key: { type: String, required: true, unique: true, lowercase: true },
-    icon: { type: String }, // لتخزين اسم أيقونة (مثلاً 'restaurant')
+    // المفتاح الثابت للبرمجة
+    key: { type: String, required: true, unique: true, lowercase: true }, 
+    // 🔥 الاسم الآن ككائن يحوي اللغات 🔥
+    name: {
+        en: { type: String, required: true },
+        ar: { type: String, required: true },
+    },
+    icon: { type: String },
     description: String,
     isAvailable: { type: Boolean, default: true }
 });
@@ -622,6 +627,36 @@ app.delete('/api/categories/:categoryId', authMiddleware, checkRole(['admin']), 
         res.json({ message: "Category deleted successfully" });
     } catch (error) {
         res.status(500).json({ error: "Server Error" });
+    }
+});
+
+
+// ================= VENDORS ROUTES (جديد) =================
+
+// 🔥🔥 1. جلب التجار بناءً على الفئة أو جلب جميع التجار 🔥🔥
+// المسار: GET /api/vendors?category=restaurant
+app.get('/api/vendors', async (req, res) => {
+    // يمكن هنا أن يكون محمياً بـ authMiddleware إذا أردنا ذلك
+    const { category } = req.query; 
+
+    // نبدأ بفلترة الدور (Role)
+    let filter = { role: 'vendor', 'storeInfo.isOpen': true };
+
+    // 💡 يمكن إضافة فلترة أخرى هنا، ولكن لتبسيط عملية التشغيل
+    // حالياً، سنعتمد فقط على جلب جميع التجار المتاحين
+    // وفي المستقبل يمكن إضافة حقل categoryKey إلى storeInfo.
+
+    try {
+        // نستخدم select('-password') لضمان عدم إرسال كلمة المرور حتى لو لم نقم بحذفها
+        const vendors = await User.find(filter).select('-password');
+        
+        // إذا كان هناك فئة محددة في Query (نحتاج إلى منطق فلترة هنا إذا أضيفت الفئة لمخطط التاجر)
+        // حالياً، سنعيد جميع التجار المتاحين (للتوافق السريع مع Flutter Mock Data)
+        
+        res.json(vendors);
+    } catch (error) {
+        console.error("Vendor Fetch Error:", error);
+        res.status(500).json({ error: "Failed to fetch vendors" });
     }
 });
 // ================= MENU & ORDERS =================
