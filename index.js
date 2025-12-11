@@ -3,13 +3,13 @@
  * 1. IMPORTS & CONFIGURATION (الإعدادات والمكتبات)
  * ============================================================
  */
-require('dotenv').config();
+require('dotenv').config(); // يستخدم لتحميل المتغيرات البيئية من ملف .env
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const helmet = require('helmet'); // للحماية الأساسية من الثغرات
+const rateLimit = require('express-rate-limit'); // لتحديد معدل الطلبات
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const fetch = require('node-fetch');
@@ -20,6 +20,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost/filo_super_app';
 const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_JWT_SECRET_KEY';
+const API_KEY = process.env.API_KEY || 'FiloSecretKey202512341234'; // مفتاح API للتحقق العام
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
@@ -68,15 +69,17 @@ const userSchema = new mongoose.Schema({
         licensePlate: String
     },
 
-    // 🏪 بيانات المتجر
+    // 🏪 بيانات المتجر (مستخدمة لعرض التجار في التطبيق)
     storeInfo: {
         storeName: String,
         description: String,
         logoUrl: String,
-        isOpen: { type: Boolean, default: true }
+        isOpen: { type: Boolean, default: true },
+        // يمكن إضافة: categoryKey: String هنا للفلترة الدقيقة
     }
 });
 
+// هاش كلمة المرور قبل الحفظ
 userSchema.pre('save', async function() {
     const user = this;
     if (!user.isModified('password')) return; 
@@ -135,11 +138,9 @@ const orderSchema = new mongoose.Schema({
 });
 const Order = mongoose.model('Order', orderSchema);
 
-// 🔥🔥 Category Schema (مخطط الفئات الجديدة) 🔥🔥
+// 🔥🔥 Category Schema 🔥🔥
 const categorySchema = new mongoose.Schema({
-    // المفتاح الثابت للبرمجة
     key: { type: String, required: true, unique: true, lowercase: true }, 
-    // 🔥 الاسم الآن ككائن يحوي اللغات 🔥
     name: {
         en: { type: String, required: true },
         ar: { type: String, required: true },
@@ -158,7 +159,7 @@ const Category = mongoose.model('Category', categorySchema);
  * 3. SERVICES (خدمات الإيميل فقط)
  * ============================================================
  */
-// 🔥 تعديل الدالة لتقبل Subject كمعامل إضافي 🔥
+// 🔥 دالة إرسال الإيميل (تتطلب BREVO_API_KEY) 🔥
 const sendOTPEmail = async (email, name, otpCode, subject) => {
     const url = "https://api.brevo.com/v3/smtp/email";
     
@@ -198,7 +199,6 @@ const sendOTPEmail = async (email, name, otpCode, subject) => {
         body: JSON.stringify({
             sender: { name: "Filo Menu Team", email: "no-reply@filomenu.com" },
             to: [{ email: email, name: name }],
-            // 🔥 استخدام Subject المتغير أو Subject افتراضي للتفعيل
             subject: subject || "🔐 رمز تفعيل حسابك - Filo", 
             htmlContent: emailDesign
         })
@@ -219,16 +219,17 @@ const sendOTPEmail = async (email, name, otpCode, subject) => {
  */
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 
+// 🛡️ Middleware للتحقق من التوكن (JWT)
 const authMiddleware = (req, res, next) => {
-    if (req.path.startsWith('/auth') || req.path.startsWith('/api/auth')) return next();
-
     try {
         const authHeader = req.headers.authorization;
+        // التحقق من وجود توكن بصيغة Bearer
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({ error: 'No Token Provided' });
         }
         const token = authHeader.split(' ')[1];
         const decodedToken = jwt.verify(token, JWT_SECRET);
+        // حفظ بيانات المستخدم في req.userData لاستخدامها في المسارات اللاحقة
         req.userData = { userId: decodedToken.userId, role: decodedToken.role };
         next();
     } catch (error) {
@@ -236,6 +237,7 @@ const authMiddleware = (req, res, next) => {
     }
 };
 
+// 🛡️ Middleware للتحقق من الدور (Role Check)
 const checkRole = (allowedRoles) => (req, res, next) => {
     const roles = Array.isArray(allowedRoles) ? allowedRoles : [allowedRoles];
     if (req.userData && roles.includes(req.userData.role)) {
@@ -255,12 +257,15 @@ app.use(helmet());
 app.use(cors());
 app.use(bodyParser.json());
 app.use(limiter);
-app.use('/api', authMiddleware);
+
+// ----------------------------------------------------
+// 🔥 المسارات العامة (Public Routes - لا تتطلب توكن)
+// ----------------------------------------------------
 
 app.get('/', (req, res) => res.send('Filo Super-App Server is Live! 🚀'));
 
 
-// ================= AUTH ROUTES =================
+// ================= AUTH ROUTES (عامة) =================
 
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, name, phone, role } = req.body;
@@ -290,7 +295,6 @@ app.post('/api/auth/register', async (req, res) => {
             });
             await user.save();
         }
-        // 🔥 استدعاء بدون subject (يأخذ الافتراضي)
         await sendOTPEmail(email, name, otpCode);
         res.status(201).json({ message: "OTP sent" });
     } catch (error) { res.status(500).json({ error: "Server Error", details: error.message }); }
@@ -387,7 +391,6 @@ app.post('/api/auth/forgot-password', async (req, res) => {
         user.otpExpires = Date.now() + 10 * 60 * 1000;
         await user.save();
 
-        // 🔥 استدعاء مع Subject مخصص للاسترجاع
         await sendOTPEmail(
             email, 
             user.name || "User", 
@@ -420,8 +423,60 @@ app.post('/api/auth/reset-password', async (req, res) => {
 });
 
 
-// 🔥 تحديث رقم الهاتف (حفظ مباشر بدون كود) 🔥
-app.post('/api/user/update-phone', authMiddleware, async (req, res) => {
+// ================= CATEGORIES ROUTES (عامة) =================
+
+// 1. جلب جميع الفئات (متاحة للجميع)
+app.get('/api/categories', async (req, res) => {
+    try {
+        const categories = await Category.find({ isAvailable: true }).sort({ name: 1 });
+        res.json(categories);
+    } catch (error) {
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+
+// ================= VENDORS ROUTES (عامة) =================
+
+// 1. جلب التجار (متاح للجميع)
+app.get('/api/vendors', async (req, res) => {
+    const { category } = req.query; 
+    let filter = { role: 'vendor', 'storeInfo.isOpen': true };
+
+    try {
+        const vendors = await User.find(filter).select('-password');
+        res.json(vendors);
+    } catch (error) {
+        console.error("Vendor Fetch Error:", error);
+        res.status(500).json({ error: "Failed to fetch vendors" });
+    }
+});
+
+
+// ================= MENU ROUTES (عامة) =================
+
+// 1. جلب قائمة الطعام لتاجر معين (متاح للجميع)
+app.get('/api/menu', async (req, res) => {
+    const { vendorId } = req.query;
+    const filter = vendorId ? { vendorId } : {};
+    try {
+        const menu = await Menu.find(filter);
+        res.json(menu);
+    } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
+});
+
+
+// ----------------------------------------------------
+// 🛡️ تطبيق الحماية (Protected Routes)
+// ----------------------------------------------------
+
+// 🔥 تطبيق الـ middleware هنا فقط للمسارات المتبقية 🔥
+app.use('/api', authMiddleware); 
+
+// ================= USER & ADDRESSES ROUTES (محمية) =================
+
+// 🔥 تحديث رقم الهاتف (محمية) 🔥
+app.post('/api/user/update-phone', async (req, res) => {
     const { phone } = req.body;
     
     if (!phone) return res.status(400).json({ error: "PHONE_REQUIRED" });
@@ -439,7 +494,7 @@ app.post('/api/user/update-phone', authMiddleware, async (req, res) => {
 });
 
 // 1. جلب بيانات المستخدم الحالية
-app.get('/api/user/profile', authMiddleware, async (req, res) => {
+app.get('/api/user/profile', async (req, res) => {
     try {
         const user = await User.findById(req.userData.userId);
         if (!user) return res.status(404).json({ error: "User not found" });
@@ -450,7 +505,7 @@ app.get('/api/user/profile', authMiddleware, async (req, res) => {
 });
 
 // 2. تحديث الاسم ورقم الهاتف
-app.put('/api/user/update-profile', authMiddleware, async (req, res) => {
+app.put('/api/user/update-profile', async (req, res) => {
     const { name, phone } = req.body;
     try {
         const user = await User.findById(req.userData.userId);
@@ -467,7 +522,7 @@ app.put('/api/user/update-profile', authMiddleware, async (req, res) => {
 });
 
 // 3. تغيير كلمة المرور (للمسجل دخول)
-app.put('/api/user/change-password', authMiddleware, async (req, res) => {
+app.put('/api/user/change-password', async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     try {
         const user = await User.findById(req.userData.userId).select('+password');
@@ -484,9 +539,9 @@ app.put('/api/user/change-password', authMiddleware, async (req, res) => {
     }
 });
 
-// ================= ADDRESS ROUTES (NEW) =================
+// ================= ADDRESS ROUTES (محمية) =================
 // 1. Fetch Addresses
-app.get('/api/user/addresses', authMiddleware, async (req, res) => {
+app.get('/api/user/addresses', async (req, res) => {
     try {
         const user = await User.findById(req.userData.userId, 'savedAddresses');
         if (!user) return res.status(404).json({ error: "User not found" });
@@ -497,7 +552,7 @@ app.get('/api/user/addresses', authMiddleware, async (req, res) => {
 });
 
 // 2. Add Address
-app.post('/api/user/addresses', authMiddleware, async (req, res) => {
+app.post('/api/user/addresses', async (req, res) => {
     const { title, details, latitude, longitude } = req.body;
 
     if (!title || !details || latitude === undefined || longitude === undefined) {
@@ -529,76 +584,66 @@ app.post('/api/user/addresses', authMiddleware, async (req, res) => {
     }
 });
 // 3. updated Address
-app.put('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
-  const { addressId } = req.params;
-  const { title, details, latitude, longitude } = req.body;
+app.put('/api/user/addresses/:addressId', async (req, res) => {
+    const { addressId } = req.params;
+    const { title, details, latitude, longitude } = req.body;
 
-  if (!title || !details || latitude === undefined || longitude === undefined) {
-    return res.status(400).json({ error: "MISSING_ADDRESS_FIELDS" });
-  }
-
-  try {
-    const user = await User.findById(req.userData.userId);
-    if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-    // 1. العثور على فهرس (Index) العنوان المراد تعديله
-    const addressIndex = user.savedAddresses.findIndex(
-      addr => addr._id.toString() === addressId
-    );
-
-    if (addressIndex === -1) {
-      return res.status(404).json({ error: "ADDRESS_NOT_FOUND" });
+    if (!title || !details || latitude === undefined || longitude === undefined) {
+        return res.status(400).json({ error: "MISSING_ADDRESS_FIELDS" });
     }
 
-    // 2. تحديث البيانات مباشرة في المخطط الفرعي (Subdocument)
-    user.savedAddresses[addressIndex].title = title;
-    user.savedAddresses[addressIndex].details = details;
-    user.savedAddresses[addressIndex].latitude = latitude;
-    user.savedAddresses[addressIndex].longitude = longitude;
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
 
-    await user.save();
+        // 1. العثور على فهرس (Index) العنوان المراد تعديله
+        const addressIndex = user.savedAddresses.findIndex(
+            addr => addr._id.toString() === addressId
+        );
 
-    res.status(200).json({ 
-      message: "Address updated successfully",
-      address: user.savedAddresses[addressIndex]
-    });
+        if (addressIndex === -1) {
+            return res.status(404).json({ error: "ADDRESS_NOT_FOUND" });
+        }
 
-  } catch (error) {
-    console.error("Address Update Error:", error);
-    res.status(500).json({ error: "Server Error" });
-  }
+        // 2. تحديث البيانات مباشرة في المخطط الفرعي (Subdocument)
+        user.savedAddresses[addressIndex].title = title;
+        user.savedAddresses[addressIndex].details = details;
+        user.savedAddresses[addressIndex].latitude = latitude;
+        user.savedAddresses[addressIndex].longitude = longitude;
+
+        await user.save();
+
+        res.status(200).json({ 
+            message: "Address updated successfully",
+            address: user.savedAddresses[addressIndex]
+        });
+
+    } catch (error) {
+        console.error("Address Update Error:", error);
+        res.status(500).json({ error: "Server Error" });
+    }
 });
 
 // 4. Delete Address
-app.delete('/api/user/addresses/:addressId', authMiddleware, async (req, res) => {
-  const { addressId } = req.params;
-  try {
-    const user = await User.findById(req.userData.userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-    
-    user.savedAddresses.pull(addressId); 
-    await user.save();
-
-    res.json({ message: "Address deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ error: "Server Error" });
-  }
-});
-
-// ================= CATEGORIES ROUTES (جديد) =================
-
-// 1. جلب جميع الفئات (متاحة للجميع)
-app.get('/api/categories', async (req, res) => {
+app.delete('/api/user/addresses/:addressId', async (req, res) => {
+    const { addressId } = req.params;
     try {
-        const categories = await Category.find({ isAvailable: true }).sort({ name: 1 });
-        res.json(categories);
+        const user = await User.findById(req.userData.userId);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        
+        user.savedAddresses.pull(addressId); 
+        await user.save();
+
+        res.json({ message: "Address deleted successfully" });
     } catch (error) {
         res.status(500).json({ error: "Server Error" });
     }
 });
 
-// 2. إضافة فئة جديدة (للمسؤولين فقط)
-app.post('/api/categories', authMiddleware, checkRole(['admin']), async (req, res) => {
+// ================= ADMIN/VENDOR ROUTES (محمية) =================
+
+// 1. إضافة فئة جديدة (للمسؤولين فقط)
+app.post('/api/categories', checkRole(['admin']), async (req, res) => {
     try {
         const { name, key, icon, description } = req.body;
         if (!name || !key || !icon) {
@@ -617,8 +662,8 @@ app.post('/api/categories', authMiddleware, checkRole(['admin']), async (req, re
     }
 });
 
-// 3. حذف فئة (للمسؤولين فقط)
-app.delete('/api/categories/:categoryId', authMiddleware, checkRole(['admin']), async (req, res) => {
+// 2. حذف فئة (للمسؤولين فقط)
+app.delete('/api/categories/:categoryId', checkRole(['admin']), async (req, res) => {
     try {
         const result = await Category.findByIdAndDelete(req.params.categoryId);
         if (!result) {
@@ -630,85 +675,52 @@ app.delete('/api/categories/:categoryId', authMiddleware, checkRole(['admin']), 
     }
 });
 
-
-// ================= VENDORS ROUTES (جديد) =================
-
-// 🔥🔥 1. جلب التجار بناءً على الفئة أو جلب جميع التجار 🔥🔥
-// المسار: GET /api/vendors?category=restaurant
-app.get('/api/vendors', async (req, res) => {
-    // يمكن هنا أن يكون محمياً بـ authMiddleware إذا أردنا ذلك
-    const { category } = req.query; 
-
-    // نبدأ بفلترة الدور (Role)
-    let filter = { role: 'vendor', 'storeInfo.isOpen': true };
-
-    // 💡 يمكن إضافة فلترة أخرى هنا، ولكن لتبسيط عملية التشغيل
-    // حالياً، سنعتمد فقط على جلب جميع التجار المتاحين
-    // وفي المستقبل يمكن إضافة حقل categoryKey إلى storeInfo.
-
-    try {
-        // نستخدم select('-password') لضمان عدم إرسال كلمة المرور حتى لو لم نقم بحذفها
-        const vendors = await User.find(filter).select('-password');
-        
-        // إذا كان هناك فئة محددة في Query (نحتاج إلى منطق فلترة هنا إذا أضيفت الفئة لمخطط التاجر)
-        // حالياً، سنعيد جميع التجار المتاحين (للتوافق السريع مع Flutter Mock Data)
-        
-        res.json(vendors);
-    } catch (error) {
-        console.error("Vendor Fetch Error:", error);
-        res.status(500).json({ error: "Failed to fetch vendors" });
-    }
-});
-// ================= MENU & ORDERS =================
-
+// 3. إضافة عنصر للقائمة (للتاجر والمسؤول)
 app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
-  try {
-    const mealData = { ...req.body };
-    if (req.userData.role === 'vendor') {
-      mealData.vendorId = req.userData.userId;
-    }
-    const newMeal = new Menu(mealData);
-    await newMeal.save();
-    res.status(201).json({ message: "Item Added", meal: newMeal });
-  } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
+    try {
+        const mealData = { ...req.body };
+        if (req.userData.role === 'vendor') {
+            mealData.vendorId = req.userData.userId;
+        }
+        const newMeal = new Menu(mealData);
+        await newMeal.save();
+        res.status(201).json({ message: "Item Added", meal: newMeal });
+    } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
 });
 
-app.get('/api/menu', async (req, res) => {
-  const { vendorId } = req.query;
-  const filter = vendorId ? { vendorId } : {};
-  try {
-    const menu = await Menu.find(filter);
-    res.json(menu);
-  } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
+
+// ================= ORDERS ROUTES (محمية) =================
+
+// 1. إضافة طلب
+app.post('/api/orders', async (req, res) => {
+    try {
+        const newOrder = new Order({ ...req.body, userId: req.userData.userId });
+        await newOrder.save();
+        res.status(201).json({ message: "Order Placed", order: newOrder });
+    } catch (error) { res.status(500).json({ error: "Failed to place order" }); }
 });
 
-app.post('/api/orders', authMiddleware, async (req, res) => {
-  try {
-    const newOrder = new Order({ ...req.body, userId: req.userData.userId });
-    await newOrder.save();
-    res.status(201).json({ message: "Order Placed", order: newOrder });
-  } catch (error) { res.status(500).json({ error: "Failed to place order" }); }
+// 2. جلب الطلبات (فلترة حسب الدور)
+app.get('/api/orders', async (req, res) => {
+    try {
+        let filter = {};
+        if (req.userData.role === 'customer') {
+            filter = { userId: req.userData.userId };
+        } else if (req.userData.role === 'vendor') {
+            filter = { vendorId: req.userData.userId };
+        } else if (req.userData.role === 'driver') {
+            filter = { 
+                $or: [
+                    { driverId: req.userData.userId }, 
+                    { status: 'ready_for_pickup', driverId: { $exists: false } } 
+                ]
+            };
+        }
+        
+        const orders = await Order.find(filter).populate('userId', 'name phone').sort({ date: -1 });
+        res.json(orders);
+    } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
 });
 
-app.get('/api/orders', authMiddleware, async (req, res) => {
-  try {
-    let filter = {};
-    if (req.userData.role === 'customer') {
-      filter = { userId: req.userData.userId };
-    } else if (req.userData.role === 'vendor') {
-      filter = { vendorId: req.userData.userId };
-    } else if (req.userData.role === 'driver') {
-      filter = { 
-        $or: [
-          { driverId: req.userData.userId }, 
-          { status: 'ready_for_pickup', driverId: { $exists: false } } 
-        ]
-      };
-    }
-    
-    const orders = await Order.find(filter).populate('userId', 'name phone').sort({ date: -1 });
-    res.json(orders);
-  } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
-});
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
