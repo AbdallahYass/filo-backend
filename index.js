@@ -3,7 +3,7 @@
  * 1. IMPORTS & CONFIGURATION (الإعدادات والمكتبات)
  * ============================================================
  */
-require('dotenv').config();
+require('dotenv').config(); 
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -38,7 +38,6 @@ mongoose.connect(MONGO_URI)
 
 // --- User Schema ---
 const userSchema = new mongoose.Schema({
-    // ... (User Schema details remain unchanged)
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true, select: false },
     name: String,
@@ -48,6 +47,10 @@ const userSchema = new mongoose.Schema({
     otpExpires: Date,
     phone: { type: String }, 
     isPhoneVerified: { type: Boolean, default: false },
+    // 🔥🔥 افتراض وجود هذه الحقول للفرز 🔥🔥
+    averageRating: { type: Number, default: 0 },
+    ordersCount: { type: Number, default: 0 }, 
+    // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
     savedAddresses: [{
         title: { type: String, required: true },
         details: { type: String, required: true },
@@ -80,7 +83,6 @@ const User = mongoose.model('User', userSchema);
 
 // --- Menu Schema ---
 const menuSchema = new mongoose.Schema({
-    // ... (Menu Schema details remain unchanged)
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, 
     title: { type: String, required: true }, 
     description: String, 
@@ -94,7 +96,6 @@ const Menu = mongoose.model('Menu', menuSchema);
 
 // --- Order Schema ---
 const orderSchema = new mongoose.Schema({
-    // ... (Order Schema details remain unchanged)
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -116,7 +117,6 @@ const Order = mongoose.model('Order', orderSchema);
 
 // 🔥🔥 Category Schema 🔥🔥
 const categorySchema = new mongoose.Schema({
-    // ... (Category Schema details remain unchanged)
     key: { type: String, required: true, unique: true, lowercase: true }, 
     name: { en: { type: String, required: true }, ar: { type: String, required: true } },
     icon: { type: String },
@@ -134,7 +134,6 @@ const Category = mongoose.model('Category', categorySchema);
  * ============================================================
  */
 const sendOTPEmail = async (email, name, otpCode, subject) => {
-    // ... (Email sending code remains unchanged)
     const url = "https://api.brevo.com/v3/smtp/email";
     
     const emailDesign = `
@@ -408,15 +407,28 @@ app.get('/api/categories', async (req, res) => {
 });
 
 
-// ================= VENDORS ROUTES (عامة) =================
+// ================= VENDORS ROUTES (عامة - مع الفرز) =================
 
 // 1. جلب التجار (متاح للجميع)
 app.get('/api/vendors', async (req, res) => {
-    const { category } = req.query; 
+    const { sortBy } = req.query; 
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
+    let sortOptions = {}; 
 
+    // 🔥 منطق تحديد الفرز 🔥
+    if (sortBy === 'rating') {
+        sortOptions = { averageRating: -1 }; 
+    } else if (sortBy === 'popular') {
+        sortOptions = { ordersCount: -1 }; 
+    } else {
+        sortOptions = { name: 1 }; // الافتراضي
+    }
+    
     try {
-        const vendors = await User.find(filter).select('-password');
+        const vendors = await User.find(filter)
+                                 .select('-password')
+                                 .sort(sortOptions); 
+        
         res.json(vendors);
     } catch (error) {
         console.error("Vendor Fetch Error:", error);
@@ -697,6 +709,7 @@ protectedRoutes.get('/orders', async (req, res) => {
 });
 
 // 🔥 ربط الـ Router المحمي بالمسار /api 🔥
+// يجب وضع هذا السطر بعد تعريف جميع المسارات المحمية وقبل app.listen
 app.use('/api', protectedRoutes);
 
 
