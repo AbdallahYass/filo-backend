@@ -3,24 +3,26 @@
  * 1. IMPORTS & CONFIGURATION (الإعدادات والمكتبات)
  * ============================================================
  */
-require('dotenv').config(); // يستخدم لتحميل المتغيرات البيئية من ملف .env
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
-const helmet = require('helmet'); // للحماية الأساسية من الثغرات
-const rateLimit = require('express-rate-limit'); // لتحديد معدل الطلبات
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const fetch = require('node-fetch');
 
 const app = express();
+// 🔥 تعريف Router جديد للمسارات المحمية 🔥
+const protectedRoutes = express.Router(); 
 
 // إعدادات المتغيرات البيئية
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost/filo_super_app';
 const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_JWT_SECRET_KEY';
-const API_KEY = process.env.API_KEY || 'FiloSecretKey202512341234'; // مفتاح API للتحقق العام
+const API_KEY = process.env.API_KEY || 'FiloSecretKey202512341234'; 
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
@@ -36,50 +38,35 @@ mongoose.connect(MONGO_URI)
 
 // --- User Schema ---
 const userSchema = new mongoose.Schema({
+    // ... (User Schema details remain unchanged)
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true, select: false },
     name: String,
-    
-    role: { 
-        type: String, 
-        default: 'customer', 
-        enum: ['customer', 'admin', 'vendor', 'driver'] 
-    },
-    
+    role: { type: String, default: 'customer', enum: ['customer', 'admin', 'vendor', 'driver'] },
     isVerified: { type: Boolean, default: false },
     otp: String,
     otpExpires: Date,
-    
     phone: { type: String }, 
     isPhoneVerified: { type: Boolean, default: false },
-
-    // 🏠 عناوين الزبون (موحدة)
     savedAddresses: [{
         title: { type: String, required: true },
         details: { type: String, required: true },
         latitude: { type: Number, default: 0 },
         longitude: { type: Number, default: 0 }
     }],
-
-    // 🛵 بيانات السائق
     driverStatus: {
         isOnline: { type: Boolean, default: false },
         currentLocation: { lat: Number, lng: Number },
         vehicleType: String,
         licensePlate: String
     },
-
-    // 🏪 بيانات المتجر (مستخدمة لعرض التجار في التطبيق)
     storeInfo: {
         storeName: String,
         description: String,
         logoUrl: String,
         isOpen: { type: Boolean, default: true },
-        // يمكن إضافة: categoryKey: String هنا للفلترة الدقيقة
     }
 });
-
-// هاش كلمة المرور قبل الحفظ
 userSchema.pre('save', async function() {
     const user = this;
     if (!user.isModified('password')) return; 
@@ -93,6 +80,7 @@ const User = mongoose.model('User', userSchema);
 
 // --- Menu Schema ---
 const menuSchema = new mongoose.Schema({
+    // ... (Menu Schema details remain unchanged)
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, 
     title: { type: String, required: true }, 
     description: String, 
@@ -106,33 +94,21 @@ const Menu = mongoose.model('Menu', menuSchema);
 
 // --- Order Schema ---
 const orderSchema = new mongoose.Schema({
+    // ... (Order Schema details remain unchanged)
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     driverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-
     items: [{
         menuId: { type: mongoose.Schema.Types.ObjectId, ref: 'Menu' },
         title: String,
         quantity: Number,
         price: Number
     }],
-    
     totalPrice: { type: Number, required: true },
     orderType: { type: String, required: true, enum: ['delivery', 'pickup', 'dine_in'], default: 'delivery' },
-    
-    shippingAddress: {
-        street: String,
-        city: String,
-        location: { lat: Number, lng: Number }
-    },
+    shippingAddress: { street: String, city: String, location: { lat: Number, lng: Number } },
     contactPhone: { type: String },
-    
-    status: { 
-        type: String, 
-        default: 'pending', 
-        enum: ['pending', 'accepted', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'completed', 'cancelled'] 
-    },
-
+    status: { type: String, default: 'pending', enum: ['pending', 'accepted', 'ready_for_pickup', 'picked_up', 'out_for_delivery', 'completed', 'cancelled'] },
     deliveryFee: { type: Number, default: 0 },
     date: { type: Date, default: Date.now }
 });
@@ -140,11 +116,9 @@ const Order = mongoose.model('Order', orderSchema);
 
 // 🔥🔥 Category Schema 🔥🔥
 const categorySchema = new mongoose.Schema({
+    // ... (Category Schema details remain unchanged)
     key: { type: String, required: true, unique: true, lowercase: true }, 
-    name: {
-        en: { type: String, required: true },
-        ar: { type: String, required: true },
-    },
+    name: { en: { type: String, required: true }, ar: { type: String, required: true } },
     icon: { type: String },
     description: String,
     isAvailable: { type: Boolean, default: true }
@@ -159,8 +133,8 @@ const Category = mongoose.model('Category', categorySchema);
  * 3. SERVICES (خدمات الإيميل فقط)
  * ============================================================
  */
-// 🔥 دالة إرسال الإيميل (تتطلب BREVO_API_KEY) 🔥
 const sendOTPEmail = async (email, name, otpCode, subject) => {
+    // ... (Email sending code remains unchanged)
     const url = "https://api.brevo.com/v3/smtp/email";
     
     const emailDesign = `
@@ -223,13 +197,11 @@ const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
 const authMiddleware = (req, res, next) => {
     try {
         const authHeader = req.headers.authorization;
-        // التحقق من وجود توكن بصيغة Bearer
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({ error: 'No Token Provided' });
         }
         const token = authHeader.split(' ')[1];
         const decodedToken = jwt.verify(token, JWT_SECRET);
-        // حفظ بيانات المستخدم في req.userData لاستخدامها في المسارات اللاحقة
         req.userData = { userId: decodedToken.userId, role: decodedToken.role };
         next();
     } catch (error) {
@@ -470,13 +442,14 @@ app.get('/api/menu', async (req, res) => {
 // 🛡️ تطبيق الحماية (Protected Routes)
 // ----------------------------------------------------
 
-// 🔥 تطبيق الـ middleware هنا فقط للمسارات المتبقية 🔥
-app.use('/api', authMiddleware); 
+// 🔥 تطبيق الـ middleware على Router المحمي 🔥
+protectedRoutes.use(authMiddleware); 
+
 
 // ================= USER & ADDRESSES ROUTES (محمية) =================
 
 // 🔥 تحديث رقم الهاتف (محمية) 🔥
-app.post('/api/user/update-phone', async (req, res) => {
+protectedRoutes.post('/user/update-phone', async (req, res) => {
     const { phone } = req.body;
     
     if (!phone) return res.status(400).json({ error: "PHONE_REQUIRED" });
@@ -494,7 +467,7 @@ app.post('/api/user/update-phone', async (req, res) => {
 });
 
 // 1. جلب بيانات المستخدم الحالية
-app.get('/api/user/profile', async (req, res) => {
+protectedRoutes.get('/user/profile', async (req, res) => {
     try {
         const user = await User.findById(req.userData.userId);
         if (!user) return res.status(404).json({ error: "User not found" });
@@ -503,9 +476,9 @@ app.get('/api/user/profile', async (req, res) => {
         res.status(500).json({ error: "Server Error" });
     }
 });
-//
+
 // 2. تحديث الاسم ورقم الهاتف
-app.put('/api/user/update-profile', async (req, res) => {
+protectedRoutes.put('/user/update-profile', async (req, res) => {
     const { name, phone } = req.body;
     try {
         const user = await User.findById(req.userData.userId);
@@ -522,7 +495,7 @@ app.put('/api/user/update-profile', async (req, res) => {
 });
 
 // 3. تغيير كلمة المرور (للمسجل دخول)
-app.put('/api/user/change-password', async (req, res) => {
+protectedRoutes.put('/user/change-password', async (req, res) => {
     const { oldPassword, newPassword } = req.body;
     try {
         const user = await User.findById(req.userData.userId).select('+password');
@@ -541,7 +514,7 @@ app.put('/api/user/change-password', async (req, res) => {
 
 // ================= ADDRESS ROUTES (محمية) =================
 // 1. Fetch Addresses
-app.get('/api/user/addresses', async (req, res) => {
+protectedRoutes.get('/user/addresses', async (req, res) => {
     try {
         const user = await User.findById(req.userData.userId, 'savedAddresses');
         if (!user) return res.status(404).json({ error: "User not found" });
@@ -552,7 +525,7 @@ app.get('/api/user/addresses', async (req, res) => {
 });
 
 // 2. Add Address
-app.post('/api/user/addresses', async (req, res) => {
+protectedRoutes.post('/user/addresses', async (req, res) => {
     const { title, details, latitude, longitude } = req.body;
 
     if (!title || !details || latitude === undefined || longitude === undefined) {
@@ -583,8 +556,9 @@ app.post('/api/user/addresses', async (req, res) => {
         res.status(500).json({ error: "Server Error" });
     }
 });
+
 // 3. updated Address
-app.put('/api/user/addresses/:addressId', async (req, res) => {
+protectedRoutes.put('/user/addresses/:addressId', async (req, res) => {
     const { addressId } = req.params;
     const { title, details, latitude, longitude } = req.body;
 
@@ -625,7 +599,7 @@ app.put('/api/user/addresses/:addressId', async (req, res) => {
 });
 
 // 4. Delete Address
-app.delete('/api/user/addresses/:addressId', async (req, res) => {
+protectedRoutes.delete('/user/addresses/:addressId', async (req, res) => {
     const { addressId } = req.params;
     try {
         const user = await User.findById(req.userData.userId);
@@ -643,7 +617,7 @@ app.delete('/api/user/addresses/:addressId', async (req, res) => {
 // ================= ADMIN/VENDOR ROUTES (محمية) =================
 
 // 1. إضافة فئة جديدة (للمسؤولين فقط)
-app.post('/api/categories', checkRole(['admin']), async (req, res) => {
+protectedRoutes.post('/categories', checkRole(['admin']), async (req, res) => {
     try {
         const { name, key, icon, description } = req.body;
         if (!name || !key || !icon) {
@@ -663,7 +637,7 @@ app.post('/api/categories', checkRole(['admin']), async (req, res) => {
 });
 
 // 2. حذف فئة (للمسؤولين فقط)
-app.delete('/api/categories/:categoryId', checkRole(['admin']), async (req, res) => {
+protectedRoutes.delete('/categories/:categoryId', checkRole(['admin']), async (req, res) => {
     try {
         const result = await Category.findByIdAndDelete(req.params.categoryId);
         if (!result) {
@@ -676,7 +650,7 @@ app.delete('/api/categories/:categoryId', checkRole(['admin']), async (req, res)
 });
 
 // 3. إضافة عنصر للقائمة (للتاجر والمسؤول)
-app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
+protectedRoutes.post('/menu', checkRole(['admin', 'vendor']), async (req, res) => {
     try {
         const mealData = { ...req.body };
         if (req.userData.role === 'vendor') {
@@ -692,7 +666,7 @@ app.post('/api/menu', checkRole(['admin', 'vendor']), async (req, res) => {
 // ================= ORDERS ROUTES (محمية) =================
 
 // 1. إضافة طلب
-app.post('/api/orders', async (req, res) => {
+protectedRoutes.post('/orders', async (req, res) => {
     try {
         const newOrder = new Order({ ...req.body, userId: req.userData.userId });
         await newOrder.save();
@@ -701,7 +675,7 @@ app.post('/api/orders', async (req, res) => {
 });
 
 // 2. جلب الطلبات (فلترة حسب الدور)
-app.get('/api/orders', async (req, res) => {
+protectedRoutes.get('/orders', async (req, res) => {
     try {
         let filter = {};
         if (req.userData.role === 'customer') {
@@ -721,6 +695,9 @@ app.get('/api/orders', async (req, res) => {
         res.json(orders);
     } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
 });
+
+// 🔥 ربط الـ Router المحمي بالمسار /api 🔥
+app.use('/api', protectedRoutes);
 
 
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
