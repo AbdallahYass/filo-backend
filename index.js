@@ -259,13 +259,45 @@ publicRoutes.get('/categories', async (req, res) => {
 
 // ================= VENDORS ROUTES (عامة - مع الفرز) =================
 
+// ================= VENDORS ROUTES (عامة - مع الفرز) =================
+
 // 1. جلب التجار (متاح للجميع)
 publicRoutes.get('/vendors', async (req, res) => {
-    const { sortBy } = req.query; 
+    // 💡 التعديل: استقبال category و sortBy 💡
+    const { sortBy, category } = req.query; 
+    
+    // الفلتر الأساسي: الدور vendor والمتجر مفتوح
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
     let sortOptions = {}; 
+    
+    // 🔥 إضافة منطق فلترة الفئة 🔥
+    if (category && category !== 'all') { // افترض أن 'all' تعني لا توجد فلترة
+        // نفترض أنك قمت بإضافة حقل 'categoryKey' للمتجر أو القائمة،
+        // ولكن بناءً على الـ User Schema الحالي، يجب أن نبحث عن طريقة ربط.
+        
+        // إذا كان المتجر يُعرف بفئته الرئيسية (وهو الأرجح):
+        // (إذا كان لديك حقل يربط المتجر بفئة معينة في storeInfo)
+        // مثال: filter['storeInfo.mainCategoryKey'] = category;
+        
+        // 💡💡 الحل الأكثر واقعية (لأنك لم تشارك ربط الفئة بالمتجر):
+        // قم بالبحث عن المتاجر التي تحتوي على منتجات من هذه الفئة.
+        try {
+            // 1. جلب جميع قوائم الطعام (Menu) التي تنتمي للفئة المطلوبة
+            const menus = await Menu.find({ category: category }).select('vendorId');
+            
+            // 2. استخراج معرفات التجار الفريدة (Vendor IDs)
+            const vendorIds = [...new Set(menus.map(menu => menu.vendorId))];
+            
+            // 3. إضافة شرط أن VendorId يجب أن يكون ضمن هذه القائمة
+            filter['_id'] = { $in: vendorIds };
+            
+        } catch (error) {
+             console.error("Category filtering error:", error);
+             return res.status(500).json({ error: "Failed to apply category filter" });
+        }
+    }
 
-    // 🔥 منطق تحديد الفرز 🔥
+    // 🔥 منطق تحديد الفرز 🔥 (يبقى كما هو)
     if (sortBy === 'rating') {
         sortOptions = { averageRating: -1 }; 
     } else if (sortBy === 'popular') {
@@ -285,7 +317,6 @@ publicRoutes.get('/vendors', async (req, res) => {
         res.status(500).json({ error: "Failed to fetch vendors" });
     }
 });
-
 
 // ================= MENU ROUTES (عامة) =================
 
