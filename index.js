@@ -20,9 +20,9 @@ const protectedRoutes = express.Router();
 
 // إعدادات المتغيرات البيئية
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI;
-const JWT_SECRET = process.env.JWT_SECRET;
-const API_KEY = process.env.API_KEY; 
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost/filo_super_app';
+const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_JWT_SECRET_KEY';
+const API_KEY = process.env.API_KEY || 'FiloSecretKey202512341234'; 
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
@@ -409,15 +409,15 @@ app.get('/api/categories', async (req, res) => {
 });
 
 
-// ================= VENDORS ROUTES (عامة - مع الفرز والفلترة) =================
+// ================= VENDORS ROUTES (عامة - مع الفرز) =================
 
 // 1. جلب التجار (متاح للجميع)
 app.get('/api/vendors', async (req, res) => {
-    const { sortBy, category } = req.query; 
-    
+    const { sortBy } = req.query; 
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
     let sortOptions = {}; 
 
+    // 🔥 منطق تحديد الفرز 🔥
     if (sortBy === 'rating') {
         sortOptions = { averageRating: -1 }; 
     } else if (sortBy === 'popular') {
@@ -676,42 +676,6 @@ protectedRoutes.post('/menu', checkRole(['admin', 'vendor']), async (req, res) =
     } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
 });
 
-// 🔥🔥 4. تحديث معلومات المتجر (ساعات العمل الجديدة) 🔥🔥
-protectedRoutes.put('/vendor/store-info', checkRole(['vendor']), async (req, res) => {
-    const { storeName, description, logoUrl, isOpen, openTime, closeTime } = req.body;
-    
-    try {
-        const vendor = await User.findById(req.userData.userId);
-        if (!vendor) {
-            return res.status(404).json({ error: "VENDOR_NOT_FOUND" });
-        }
-
-        if (!vendor.storeInfo) {
-            vendor.storeInfo = {};
-        }
-
-        // تحديث الحقول
-        if (storeName !== undefined) vendor.storeInfo.storeName = storeName;
-        if (description !== undefined) vendor.storeInfo.description = description;
-        if (logoUrl !== undefined) vendor.storeInfo.logoUrl = logoUrl;
-        if (isOpen !== undefined) vendor.storeInfo.isOpen = isOpen;
-        
-        // تحديث ساعات العمل الجديدة
-        if (openTime !== undefined) vendor.storeInfo.openTime = openTime;
-        if (closeTime !== undefined) vendor.storeInfo.closeTime = closeTime;
-        
-        await vendor.save();
-        
-        vendor.password = undefined; 
-        
-        res.json({ message: "Store info updated successfully", vendor });
-        
-    } catch (error) {
-        console.error("Store Update Error:", error);
-        res.status(500).json({ error: "Failed to update store info" });
-    }
-});
-// 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
 
 // ================= ORDERS ROUTES (محمية) =================
 
