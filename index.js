@@ -427,7 +427,7 @@ publicRoutes.get('/vendors', async (req, res) => {
     try {
         // 🔥🔥 التعديل النهائي: تحديد الحقول الصريح لتجنب مشاكل Select 🔥🔥
         const vendors = await User.find(filter)
-                                 .select('email name role isVerified averageRating ordersCount storeInfo phone') 
+                                 .select('email name role isVerified averageRating ordersCount reviewsCount storeInfo phone')
                                  .sort(sortOptions); 
         
         res.json(vendors);
