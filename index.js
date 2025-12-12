@@ -15,10 +15,8 @@ const bcrypt = require('bcrypt');
 const fetch = require('node-fetch');
 
 const app = express();
-// 🔥 تعريف Router جديد للمسارات العامة 🔥
-const publicRoutes = express.Router(); 
-// 🔥 تعريف Router جديد للمسارات المحمية 🔥
 const protectedRoutes = express.Router(); 
+const publicRoutes = express.Router(); // 🔥 نستخدمه لتجميع المسارات العامة مؤقتا
 
 // إعدادات المتغيرات البيئية
 const PORT = process.env.PORT || 3000;
@@ -37,8 +35,8 @@ mongoose.connect(MONGO_URI)
  * 2. DATABASE MODELS (نماذج قاعدة البيانات)
  * ============================================================
  */
+// (*** User Schema, Menu Schema, Order Schema, Category Schema تبقى كما هي ***)
 
-// --- User Schema ---
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true, select: false },
@@ -49,7 +47,6 @@ const userSchema = new mongoose.Schema({
     otpExpires: Date,
     phone: { type: String }, 
     isPhoneVerified: { type: Boolean, default: false },
-    // 🔥🔥 حقول التقييم والطلبات 🔥🔥
     averageRating: { type: Number, default: 0 },
     ordersCount: { type: Number, default: 0 }, 
     savedAddresses: [{
@@ -69,7 +66,6 @@ const userSchema = new mongoose.Schema({
         description: String,
         logoUrl: String,
         isOpen: { type: Boolean, default: true },
-        // 🔥🔥 ساعات العمل المضافة لتوافق مع Flutter 🔥🔥
         openTime: { type: String, default: '09:00' }, 
         closeTime: { type: String, default: '22:00' }, 
     }
@@ -240,158 +236,12 @@ app.get('/', (req, res) => res.send('Filo Super-App Server is Live! 🚀'));
 
 // ================= AUTH ROUTES (عامة) =================
 
-publicRoutes.post('/auth/register', async (req, res) => {
-    const { email, password, name, phone, role } = req.body;
-    try {
-        let user = await User.findOne({ email });
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        const otpExpiry = Date.now() + 10 * 60 * 1000;
-        const userRole = role || 'customer'; 
-
-        if (user) {
-            if (user.isVerified) return res.status(400).json({ error: "EMAIL_IN_USE" });
-            user.name = name; 
-            user.password = password; 
-            user.otp = otpCode; 
-            user.otpExpires = otpExpiry; 
-            user.role = userRole; 
-            user.phone = phone; 
-            if(phone) user.isPhoneVerified = true; 
-            await user.save();
-        } else {
-            user = new User({ 
-                email, password, name, phone, 
-                role: userRole, 
-                isVerified: false, 
-                otp: otpCode, otpExpires: otpExpiry,
-                isPhoneVerified: !!phone 
-            });
-            await user.save();
-        }
-        await sendOTPEmail(email, name, otpCode);
-        res.status(201).json({ message: "OTP sent" });
-    } catch (error) { res.status(500).json({ error: "Server Error", details: error.message }); }
-});
-
-publicRoutes.post('/auth/verify', async (req, res) => {
-    const { email, otp } = req.body;
-    try {
-        const user = await User.findOne({ email });
-        if (!user || user.otp !== otp || user.otpExpires < Date.now()) return res.status(400).json({ error: "INVALID_OTP" });
-        user.isVerified = true; user.otp = undefined;
-        await user.save();
-        res.status(200).json({ message: "Verified" });
-    } catch (error) { res.status(500).json({ error: "Server Error" }); }
-});
-
-publicRoutes.post('/auth/login', async (req, res) => {
-    const { email, password } = req.body;
-    try {
-        const user = await User.findOne({ email }).select('+password');
-        if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "WRONG_CREDENTIALS" });
-        if (!user.isVerified) return res.status(403).json({ error: "NOT_VERIFIED" });
-        
-        const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
-        user.password = undefined;
-        res.json({ message: "Logged In", token, user });
-    } catch (error) { res.status(500).json({ error: "Server Error" }); }
-});
-
-publicRoutes.post('/auth/google', async (req, res) => {
-    const { accessToken } = req.body;
-    if (!accessToken) return res.status(400).json({ error: "Access token is required" });
-
-    try {
-        const googleResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-            headers: { Authorization: `Bearer ${accessToken}` }
-        });
-
-        if (!googleResponse.ok) return res.status(400).json({ error: "INVALID_GOOGLE_TOKEN" });
-
-        const googleData = await googleResponse.json();
-        const { email, name } = googleData;
-
-        let user = await User.findOne({ email });
-
-        if (!user) {
-            const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
-            user = new User({
-                email: email,
-                name: name,
-                password: randomPassword,
-                role: 'customer',
-                isVerified: true,
-                isPhoneVerified: false
-            });
-            await user.save();
-        }
-
-        const token = jwt.sign(
-            { userId: user._id, role: user.role }, 
-            JWT_SECRET, 
-            { expiresIn: '30d' }
-        );
-
-        res.status(200).json({
-            message: "Google Login Success",
-            token: token,
-            user: {
-                _id: user._id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                isVerified: user.isVerified,
-                phone: user.phone
-            }
-        });
-
-    } catch (error) {
-        console.error("Google Auth Error:", error);
-        res.status(500).json({ error: "Server Error" });
-    }
-});
-
-publicRoutes.post('/auth/forgot-password', async (req, res) => {
-    const { email } = req.body;
-    try {
-        const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ error: "EMAIL_NOT_FOUND" }); 
-
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-        user.otp = otpCode;
-        user.otpExpires = Date.now() + 10 * 60 * 1000;
-        await user.save();
-
-        await sendOTPEmail(
-            email, 
-            user.name || "User", 
-            otpCode, 
-            "🔑 كود استرجاع كلمة المرور الخاصة بك - Filo" 
-        ); 
-        
-        res.json({ message: "RESET_CODE_SENT" }); 
-    } catch (error) { res.status(500).json({ error: "Server Error" }); }
-});
-
-publicRoutes.post('/auth/reset-password', async (req, res) => {
-    const { email, otp, newPassword } = req.body;
-    try {
-        const user = await User.findOne({ email });
-        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
-
-        if (user.otp !== otp || user.otpExpires < Date.now()) {
-            return res.status(400).json({ error: "INVALID_OTP_OR_EXPIRED" }); 
-        }
-
-        user.password = newPassword;
-        user.otp = undefined;
-        user.otpExpires = undefined;
-        if (!user.isVerified) user.isVerified = true;
-
-        await user.save();
-        res.json({ message: "PASSWORD_RESET_SUCCESS" }); 
-    } catch (error) { res.status(500).json({ error: "Server Error" }); }
-});
+publicRoutes.post('/auth/register', async (req, res) => { /* ... */ });
+publicRoutes.post('/auth/verify', async (req, res) => { /* ... */ });
+publicRoutes.post('/auth/login', async (req, res) => { /* ... */ });
+publicRoutes.post('/auth/google', async (req, res) => { /* ... */ });
+publicRoutes.post('/auth/forgot-password', async (req, res) => { /* ... */ });
+publicRoutes.post('/auth/reset-password', async (req, res) => { /* ... */ });
 
 
 // ================= CATEGORIES ROUTES (عامة) =================
@@ -449,7 +299,7 @@ publicRoutes.get('/menu', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
 });
 
-// 🔥🔥 تطبيق المسارات العامة أولاً (لن تخضع للحماية) 🔥🔥
+// 🔥🔥 تطبيق المسارات العامة أولاً (لتجنب الحماية) 🔥🔥
 app.use('/api', publicRoutes);
 
 
@@ -711,7 +561,7 @@ protectedRoutes.get('/orders', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
 });
 
-// 🔥🔥 تطبيق المسارات المحمية ثانياً 🔥🔥
+// 🔥 ربط الـ Router المحمي بالمسار /api 🔥
 app.use('/api', protectedRoutes);
 
 
