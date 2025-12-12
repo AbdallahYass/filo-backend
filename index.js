@@ -52,6 +52,7 @@ const userSchema = new mongoose.Schema({
     // 🔥🔥 حقول التقييم والطلبات 🔥🔥
     averageRating: { type: Number, default: 0 },
     ordersCount: { type: Number, default: 0 }, 
+    savedVendors: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     savedAddresses: [{
         title: { type: String, required: true },
         details: { type: String, required: true },
@@ -629,7 +630,67 @@ protectedRoutes.delete('/user/addresses/:addressId', async (req, res) => {
         res.status(500).json({ error: "Server Error" });
     }
 });
+// ================= FAVORITES ROUTES (محمية) =================
 
+// 1. إضافة تاجر إلى المفضلة
+protectedRoutes.post('/user/favorites/:vendorId', async (req, res) => {
+    const { vendorId } = req.params;
+    
+    // التأكد من أن الـ ID الممرر هو ID تاجر حقيقي
+    const vendorExists = await User.findOne({ _id: vendorId, role: 'vendor' });
+    if (!vendorExists) {
+        return res.status(404).json({ error: "VENDOR_NOT_FOUND" });
+    }
+
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) {
+            return res.status(404).json({ error: "USER_NOT_FOUND" });
+        }
+
+        const vendorIdObj = new mongoose.Types.ObjectId(vendorId);
+        
+        // التحقق مما إذا كان التاجر موجوداً بالفعل
+        if (user.savedVendors.includes(vendorIdObj)) {
+            return res.status(409).json({ message: "Vendor already in favorites" });
+        }
+
+        user.savedVendors.push(vendorIdObj);
+        await user.save();
+
+        res.json({ message: "Vendor added to favorites successfully" });
+
+    } catch (error) {
+        res.status(500).json({ error: "Failed to add favorite" });
+    }
+});
+
+// 2. إزالة تاجر من المفضلة
+protectedRoutes.delete('/user/favorites/:vendorId', async (req, res) => {
+    const { vendorId } = req.params;
+    
+    try {
+        const user = await User.findById(req.userData.userId);
+        if (!user) {
+            return res.status(404).json({ error: "USER_NOT_FOUND" });
+        }
+        
+        const initialLength = user.savedVendors.length;
+        
+        // إزالة الـ ID من قائمة المفضلة
+        user.savedVendors.pull(vendorId); 
+        
+        if (user.savedVendors.length === initialLength) {
+             return res.status(404).json({ message: "Vendor not found in favorites" });
+        }
+
+        await user.save();
+        res.json({ message: "Vendor removed from favorites successfully" });
+
+    } catch (error) {
+        res.status(500).json({ error: "Failed to remove favorite" });
+    }
+});
 // ================= ADMIN/VENDOR ROUTES (محمية) =================
 
 // 1. إضافة فئة جديدة (للمسؤولين فقط)
