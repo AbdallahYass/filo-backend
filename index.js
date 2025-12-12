@@ -15,8 +15,10 @@ const bcrypt = require('bcrypt');
 const fetch = require('node-fetch');
 
 const app = express();
+// 🔥 تعريف Router جديد للمسارات العامة 🔥
+const publicRoutes = express.Router(); 
+// 🔥 تعريف Router جديد للمسارات المحمية 🔥
 const protectedRoutes = express.Router(); 
-const publicRoutes = express.Router(); // 🔥 نستخدمه لتجميع المسارات العامة مؤقتا
 
 // إعدادات المتغيرات البيئية
 const PORT = process.env.PORT || 3000;
@@ -35,8 +37,8 @@ mongoose.connect(MONGO_URI)
  * 2. DATABASE MODELS (نماذج قاعدة البيانات)
  * ============================================================
  */
-// (*** User Schema, Menu Schema, Order Schema, Category Schema تبقى كما هي ***)
 
+// --- User Schema ---
 const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true, select: false },
@@ -47,6 +49,7 @@ const userSchema = new mongoose.Schema({
     otpExpires: Date,
     phone: { type: String }, 
     isPhoneVerified: { type: Boolean, default: false },
+    // 🔥🔥 حقول التقييم والطلبات 🔥🔥
     averageRating: { type: Number, default: 0 },
     ordersCount: { type: Number, default: 0 }, 
     savedAddresses: [{
@@ -66,6 +69,7 @@ const userSchema = new mongoose.Schema({
         description: String,
         logoUrl: String,
         isOpen: { type: Boolean, default: true },
+        // 🔥🔥 ساعات العمل المضافة لتوافق مع Flutter 🔥🔥
         openTime: { type: String, default: '09:00' }, 
         closeTime: { type: String, default: '22:00' }, 
     }
@@ -236,12 +240,158 @@ app.get('/', (req, res) => res.send('Filo Super-App Server is Live! 🚀'));
 
 // ================= AUTH ROUTES (عامة) =================
 
-publicRoutes.post('/auth/register', async (req, res) => { /* ... */ });
-publicRoutes.post('/auth/verify', async (req, res) => { /* ... */ });
-publicRoutes.post('/auth/login', async (req, res) => { /* ... */ });
-publicRoutes.post('/auth/google', async (req, res) => { /* ... */ });
-publicRoutes.post('/auth/forgot-password', async (req, res) => { /* ... */ });
-publicRoutes.post('/auth/reset-password', async (req, res) => { /* ... */ });
+publicRoutes.post('/auth/register', async (req, res) => {
+    const { email, password, name, phone, role } = req.body;
+    try {
+        let user = await User.findOne({ email });
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const otpExpiry = Date.now() + 10 * 60 * 1000;
+        const userRole = role || 'customer'; 
+
+        if (user) {
+            if (user.isVerified) return res.status(400).json({ error: "EMAIL_IN_USE" });
+            user.name = name; 
+            user.password = password; 
+            user.otp = otpCode; 
+            user.otpExpires = otpExpiry; 
+            user.role = userRole; 
+            user.phone = phone; 
+            if(phone) user.isPhoneVerified = true; 
+            await user.save();
+        } else {
+            user = new User({ 
+                email, password, name, phone, 
+                role: userRole, 
+                isVerified: false, 
+                otp: otpCode, otpExpires: otpExpiry,
+                isPhoneVerified: !!phone 
+            });
+            await user.save();
+        }
+        await sendOTPEmail(email, name, otpCode);
+        res.status(201).json({ message: "OTP sent" });
+    } catch (error) { res.status(500).json({ error: "Server Error", details: error.message }); }
+});
+
+publicRoutes.post('/auth/verify', async (req, res) => {
+    const { email, otp } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user || user.otp !== otp || user.otpExpires < Date.now()) return res.status(400).json({ error: "INVALID_OTP" });
+        user.isVerified = true; user.otp = undefined;
+        await user.save();
+        res.status(200).json({ message: "Verified" });
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
+
+publicRoutes.post('/auth/login', async (req, res) => {
+    const { email, password } = req.body;
+    try {
+        const user = await User.findOne({ email }).select('+password');
+        if (!user || !(await bcrypt.compare(password, user.password))) return res.status(401).json({ error: "WRONG_CREDENTIALS" });
+        if (!user.isVerified) return res.status(403).json({ error: "NOT_VERIFIED" });
+        
+        const token = jwt.sign({ userId: user._id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+        user.password = undefined;
+        res.json({ message: "Logged In", token, user });
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
+
+publicRoutes.post('/auth/google', async (req, res) => {
+    const { accessToken } = req.body;
+    if (!accessToken) return res.status(400).json({ error: "Access token is required" });
+
+    try {
+        const googleResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${accessToken}` }
+        });
+
+        if (!googleResponse.ok) return res.status(400).json({ error: "INVALID_GOOGLE_TOKEN" });
+
+        const googleData = await googleResponse.json();
+        const { email, name } = googleData;
+
+        let user = await User.findOne({ email });
+
+        if (!user) {
+            const randomPassword = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+            user = new User({
+                email: email,
+                name: name,
+                password: randomPassword,
+                role: 'customer',
+                isVerified: true,
+                isPhoneVerified: false
+            });
+            await user.save();
+        }
+
+        const token = jwt.sign(
+            { userId: user._id, role: user.role }, 
+            JWT_SECRET, 
+            { expiresIn: '30d' }
+        );
+
+        res.status(200).json({
+            message: "Google Login Success",
+            token: token,
+            user: {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                isVerified: user.isVerified,
+                phone: user.phone
+            }
+        });
+
+    } catch (error) {
+        console.error("Google Auth Error:", error);
+        res.status(500).json({ error: "Server Error" });
+    }
+});
+
+publicRoutes.post('/auth/forgot-password', async (req, res) => {
+    const { email } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "EMAIL_NOT_FOUND" }); 
+
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        user.otp = otpCode;
+        user.otpExpires = Date.now() + 10 * 60 * 1000;
+        await user.save();
+
+        await sendOTPEmail(
+            email, 
+            user.name || "User", 
+            otpCode, 
+            "🔑 كود استرجاع كلمة المرور الخاصة بك - Filo" 
+        ); 
+        
+        res.json({ message: "RESET_CODE_SENT" }); 
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
+
+publicRoutes.post('/auth/reset-password', async (req, res) => {
+    const { email, otp, newPassword } = req.body;
+    try {
+        const user = await User.findOne({ email });
+        if (!user) return res.status(404).json({ error: "USER_NOT_FOUND" });
+
+        if (user.otp !== otp || user.otpExpires < Date.now()) {
+            return res.status(400).json({ error: "INVALID_OTP_OR_EXPIRED" }); 
+        }
+
+        user.password = newPassword;
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        if (!user.isVerified) user.isVerified = true;
+
+        await user.save();
+        res.json({ message: "PASSWORD_RESET_SUCCESS" }); 
+    } catch (error) { res.status(500).json({ error: "Server Error" }); }
+});
 
 
 // ================= CATEGORIES ROUTES (عامة) =================
@@ -259,45 +409,13 @@ publicRoutes.get('/categories', async (req, res) => {
 
 // ================= VENDORS ROUTES (عامة - مع الفرز) =================
 
-// ================= VENDORS ROUTES (عامة - مع الفرز) =================
-
 // 1. جلب التجار (متاح للجميع)
 publicRoutes.get('/vendors', async (req, res) => {
-    // 💡 التعديل: استقبال category و sortBy 💡
-    const { sortBy, category } = req.query; 
-    
-    // الفلتر الأساسي: الدور vendor والمتجر مفتوح
+    const { sortBy } = req.query; 
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
     let sortOptions = {}; 
-    
-    // 🔥 إضافة منطق فلترة الفئة 🔥
-    if (category && category !== 'all') { // افترض أن 'all' تعني لا توجد فلترة
-        // نفترض أنك قمت بإضافة حقل 'categoryKey' للمتجر أو القائمة،
-        // ولكن بناءً على الـ User Schema الحالي، يجب أن نبحث عن طريقة ربط.
-        
-        // إذا كان المتجر يُعرف بفئته الرئيسية (وهو الأرجح):
-        // (إذا كان لديك حقل يربط المتجر بفئة معينة في storeInfo)
-        // مثال: filter['storeInfo.mainCategoryKey'] = category;
-        
-        // 💡💡 الحل الأكثر واقعية (لأنك لم تشارك ربط الفئة بالمتجر):
-        // قم بالبحث عن المتاجر التي تحتوي على منتجات من هذه الفئة.
-        try {
-            // 1. جلب جميع قوائم الطعام (Menu) التي تنتمي للفئة المطلوبة
-            const menus = await Menu.find({ category: category }).select('vendorId');
-            
-            // 2. استخراج معرفات التجار الفريدة (Vendor IDs)
-            const vendorIds = [...new Set(menus.map(menu => menu.vendorId))];
-            
-            // 3. إضافة شرط أن VendorId يجب أن يكون ضمن هذه القائمة
-            filter['_id'] = { $in: vendorIds };
-            
-        } catch (error) {
-             console.error("Category filtering error:", error);
-             return res.status(500).json({ error: "Failed to apply category filter" });
-        }
-    }
 
-    // 🔥 منطق تحديد الفرز 🔥 (يبقى كما هو)
+    // منطق تحديد الفرز
     if (sortBy === 'rating') {
         sortOptions = { averageRating: -1 }; 
     } else if (sortBy === 'popular') {
@@ -307,8 +425,9 @@ publicRoutes.get('/vendors', async (req, res) => {
     }
     
     try {
+        // 🔥🔥 التعديل النهائي: تحديد الحقول الصريح لتجنب مشاكل Select 🔥🔥
         const vendors = await User.find(filter)
-                                 .select('-password')
+                                 .select('email name role isVerified averageRating ordersCount storeInfo phone') 
                                  .sort(sortOptions); 
         
         res.json(vendors);
@@ -317,6 +436,7 @@ publicRoutes.get('/vendors', async (req, res) => {
         res.status(500).json({ error: "Failed to fetch vendors" });
     }
 });
+
 
 // ================= MENU ROUTES (عامة) =================
 
@@ -330,7 +450,7 @@ publicRoutes.get('/menu', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
 });
 
-// 🔥🔥 تطبيق المسارات العامة أولاً (لتجنب الحماية) 🔥🔥
+// 🔥🔥 تطبيق المسارات العامة أولاً (لن تخضع للحماية) 🔥🔥
 app.use('/api', publicRoutes);
 
 
@@ -556,6 +676,61 @@ protectedRoutes.post('/menu', checkRole(['admin', 'vendor']), async (req, res) =
         await newMeal.save();
         res.status(201).json({ message: "Item Added", meal: newMeal });
     } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
+});
+
+// 🔥🔥 4. تحديث معلومات المتجر (ساعات العمل الجديدة) 🔥🔥
+protectedRoutes.put('/vendor/store-info', checkRole(['vendor']), async (req, res) => {
+    const { storeName, description, logoUrl, isOpen, openTime, closeTime } = req.body;
+    
+    try {
+        const vendor = await User.findById(req.userData.userId);
+        if (!vendor) {
+            return res.status(404).json({ error: "VENDOR_NOT_FOUND" });
+        }
+
+        if (!vendor.storeInfo) {
+            vendor.storeInfo = {};
+        }
+
+        // تحديث الحقول
+        if (storeName !== undefined) vendor.storeInfo.storeName = storeName;
+        if (description !== undefined) vendor.storeInfo.description = description;
+        if (logoUrl !== undefined) vendor.storeInfo.logoUrl = logoUrl;
+        if (isOpen !== undefined) vendor.storeInfo.isOpen = isOpen;
+        
+        // تحديث ساعات العمل الجديدة
+        if (openTime !== undefined) vendor.storeInfo.openTime = openTime;
+        if (closeTime !== undefined) vendor.storeInfo.closeTime = closeTime;
+        
+        await vendor.save();
+        
+        vendor.password = undefined; 
+        
+        res.json({ message: "Store info updated successfully", vendor });
+        
+    } catch (error) {
+        console.error("Store Update Error:", error);
+        res.status(500).json({ error: "Failed to update store info" });
+    }
+});
+
+// 🔥🔥 5. مسار حذف التجار الوهميين (للمسؤول فقط) 🔥🔥
+protectedRoutes.delete('/admin/cleanup-all-vendors', checkRole(['admin']), async (req, res) => {
+    try {
+        // الفلتر: حذف كل من يملك دور 'vendor'
+        const filter = { role: 'vendor' }; 
+        
+        const result = await User.deleteMany(filter);
+        
+        res.json({ 
+            message: "All vendors deleted successfully (Mock Cleanup)", 
+            deletedCount: result.deletedCount 
+        });
+        
+    } catch (error) {
+        console.error("Cleanup Error:", error);
+        res.status(500).json({ error: "Failed to cleanup vendors" });
+    }
 });
 
 
