@@ -47,10 +47,9 @@ const userSchema = new mongoose.Schema({
     otpExpires: Date,
     phone: { type: String }, 
     isPhoneVerified: { type: Boolean, default: false },
-    // 🔥🔥 افتراض وجود هذه الحقول للفرز 🔥🔥
+    // 🔥🔥 حقول التقييم والطلبات 🔥🔥
     averageRating: { type: Number, default: 0 },
     ordersCount: { type: Number, default: 0 }, 
-    // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
     savedAddresses: [{
         title: { type: String, required: true },
         details: { type: String, required: true },
@@ -68,10 +67,9 @@ const userSchema = new mongoose.Schema({
         description: String,
         logoUrl: String,
         isOpen: { type: Boolean, default: true },
-        // 🔥🔥 إضافة حقول ساعات العمل الجديدة 🔥🔥
+        // 🔥🔥 ساعات العمل المضافة لتوافق مع Flutter 🔥🔥
         openTime: { type: String, default: '09:00' }, 
         closeTime: { type: String, default: '22:00' }, 
-        // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
     }
 });
 userSchema.pre('save', async function() {
@@ -415,28 +413,15 @@ app.get('/api/categories', async (req, res) => {
 
 // 1. جلب التجار (متاح للجميع)
 app.get('/api/vendors', async (req, res) => {
-    // 🔥🔥 استخلاص كل من sortBy و category من الـ query 🔥🔥
     const { sortBy, category } = req.query; 
     
-    // الفلترة الأساسية: Role = Vendor & Store Open
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
     let sortOptions = {}; 
 
-    // تطبيق فلترة الفئة إذا كانت موجودة (افتراضاً لديك حقل ربط)
-    // إذا كنت لا تملك حقل ربط في UserSchema (مثل categoryKey)، قم بإلغاء هذا الجزء.
-    // **ملاحظة:** بناءً على الكود الذي قدمته، لا يوجد حقل 'categoryKey' في userSchema، 
-    // لذا سنبقي الفلترة فقط على الدور والحالة، وسيقوم الـ Client-side بعمل الفلترة النهائية.
-    /*
-    if (category) {
-        filter['categoryKey'] = category; // تحتاج إلى هذا الحقل في المخطط إذا استخدمته
-    }
-    */
-
-    // 🔥 منطق تحديد الفرز 🔥
     if (sortBy === 'rating') {
         sortOptions = { averageRating: -1 }; 
     } else if (sortBy === 'popular') {
-        sortOptions = { ordersCount: -1 }; // يعتمد على ordersCount
+        sortOptions = { ordersCount: -1 }; 
     } else {
         sortOptions = { name: 1 }; // الافتراضي
     }
@@ -691,6 +676,42 @@ protectedRoutes.post('/menu', checkRole(['admin', 'vendor']), async (req, res) =
     } catch (error) { res.status(500).json({ error: "Failed to add item" }); }
 });
 
+// 🔥🔥 4. تحديث معلومات المتجر (ساعات العمل الجديدة) 🔥🔥
+protectedRoutes.put('/vendor/store-info', checkRole(['vendor']), async (req, res) => {
+    const { storeName, description, logoUrl, isOpen, openTime, closeTime } = req.body;
+    
+    try {
+        const vendor = await User.findById(req.userData.userId);
+        if (!vendor) {
+            return res.status(404).json({ error: "VENDOR_NOT_FOUND" });
+        }
+
+        if (!vendor.storeInfo) {
+            vendor.storeInfo = {};
+        }
+
+        // تحديث الحقول
+        if (storeName !== undefined) vendor.storeInfo.storeName = storeName;
+        if (description !== undefined) vendor.storeInfo.description = description;
+        if (logoUrl !== undefined) vendor.storeInfo.logoUrl = logoUrl;
+        if (isOpen !== undefined) vendor.storeInfo.isOpen = isOpen;
+        
+        // تحديث ساعات العمل الجديدة
+        if (openTime !== undefined) vendor.storeInfo.openTime = openTime;
+        if (closeTime !== undefined) vendor.storeInfo.closeTime = closeTime;
+        
+        await vendor.save();
+        
+        vendor.password = undefined; 
+        
+        res.json({ message: "Store info updated successfully", vendor });
+        
+    } catch (error) {
+        console.error("Store Update Error:", error);
+        res.status(500).json({ error: "Failed to update store info" });
+    }
+});
+// 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
 
 // ================= ORDERS ROUTES (محمية) =================
 
@@ -726,7 +747,6 @@ protectedRoutes.get('/orders', async (req, res) => {
 });
 
 // 🔥 ربط الـ Router المحمي بالمسار /api 🔥
-// يجب وضع هذا السطر بعد تعريف جميع المسارات المحمية وقبل app.listen
 app.use('/api', protectedRoutes);
 
 
