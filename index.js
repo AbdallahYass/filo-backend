@@ -15,6 +15,8 @@ const bcrypt = require('bcrypt');
 const fetch = require('node-fetch');
 
 const app = express();
+// 🔥 تعريف Router جديد للمسارات العامة 🔥
+const publicRoutes = express.Router(); 
 // 🔥 تعريف Router جديد للمسارات المحمية 🔥
 const protectedRoutes = express.Router(); 
 
@@ -139,30 +141,28 @@ const sendOTPEmail = async (email, name, otpCode, subject) => {
     const url = "https://api.brevo.com/v3/smtp/email";
     
     const emailDesign = `
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
+     <!DOCTYPE html>
+     <html lang="ar" dir="rtl">
+     <head>
         <meta charset="UTF-8">
-        <style>
-            /* ... (Styles omitted for brevity) ... */
-        </style>
-    </head>
-    <body>
-        <div class="email-container">
-            <div class="header">
-                <img src="https://placehold.co/400x150/1A1A1A/C5A028?text=FILO+MENU+LOGO" alt="Filo Logo" class="logo-image">
-            </div>
-            <div class="content">
-                <p class="welcome-text">أهلاً بك يا ${name} 👋</p>
-                <p class="sub-text">رمز التفعيل الخاص بك هو:</p>
-                <div class="otp-box"><div class="otp-code">${otpCode}</div></div>
-                <p class="sub-text">صالح لمدة 10 دقائق.</p>
-            </div>
-            <div class="footer"><p>&copy; ${new Date().getFullYear()} Filo App.</p></div>
-        </div>
-    </body>
-    </html>
-    `;
+        <style> /* ... (Styles omitted for brevity) ... */ </style>
+     </head>
+     <body>
+         <div class="email-container">
+             <div class="header">
+                 <img src="https://placehold.co/400x150/1A1A1A/C5A028?text=FILO+MENU+LOGO" alt="Filo Logo" class="logo-image">
+             </div>
+             <div class="content">
+                 <p class="welcome-text">أهلاً بك يا ${name} 👋</p>
+                 <p class="sub-text">رمز التفعيل الخاص بك هو:</p>
+                 <div class="otp-box"><div class="otp-code">${otpCode}</div></div>
+                 <p class="sub-text">صالح لمدة 10 دقائق.</p>
+             </div>
+             <div class="footer"><p>&copy; ${new Date().getFullYear()} Filo App.</p></div>
+         </div>
+     </body>
+     </html>
+     `;
 
     const options = {
         method: "POST",
@@ -240,7 +240,7 @@ app.get('/', (req, res) => res.send('Filo Super-App Server is Live! 🚀'));
 
 // ================= AUTH ROUTES (عامة) =================
 
-app.post('/api/auth/register', async (req, res) => {
+publicRoutes.post('/auth/register', async (req, res) => {
     const { email, password, name, phone, role } = req.body;
     try {
         let user = await User.findOne({ email });
@@ -273,7 +273,7 @@ app.post('/api/auth/register', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Server Error", details: error.message }); }
 });
 
-app.post('/api/auth/verify', async (req, res) => {
+publicRoutes.post('/auth/verify', async (req, res) => {
     const { email, otp } = req.body;
     try {
         const user = await User.findOne({ email });
@@ -284,7 +284,7 @@ app.post('/api/auth/verify', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+publicRoutes.post('/auth/login', async (req, res) => {
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email }).select('+password');
@@ -297,8 +297,7 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-// --- Google Auth Route ---
-app.post('/api/auth/google', async (req, res) => {
+publicRoutes.post('/auth/google', async (req, res) => {
     const { accessToken } = req.body;
     if (!accessToken) return res.status(400).json({ error: "Access token is required" });
 
@@ -352,8 +351,7 @@ app.post('/api/auth/google', async (req, res) => {
     }
 });
 
-// --- Forgot Password Flow ---
-app.post('/api/auth/forgot-password', async (req, res) => {
+publicRoutes.post('/auth/forgot-password', async (req, res) => {
     const { email } = req.body;
     try {
         const user = await User.findOne({ email });
@@ -375,7 +373,7 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Server Error" }); }
 });
 
-app.post('/api/auth/reset-password', async (req, res) => {
+publicRoutes.post('/auth/reset-password', async (req, res) => {
     const { email, otp, newPassword } = req.body;
     try {
         const user = await User.findOne({ email });
@@ -399,7 +397,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 // ================= CATEGORIES ROUTES (عامة) =================
 
 // 1. جلب جميع الفئات (متاحة للجميع)
-app.get('/api/categories', async (req, res) => {
+publicRoutes.get('/categories', async (req, res) => {
     try {
         const categories = await Category.find({ isAvailable: true }).sort({ name: 1 });
         res.json(categories);
@@ -412,7 +410,7 @@ app.get('/api/categories', async (req, res) => {
 // ================= VENDORS ROUTES (عامة - مع الفرز) =================
 
 // 1. جلب التجار (متاح للجميع)
-app.get('/api/vendors', async (req, res) => {
+publicRoutes.get('/vendors', async (req, res) => {
     const { sortBy } = req.query; 
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
     let sortOptions = {}; 
@@ -442,7 +440,7 @@ app.get('/api/vendors', async (req, res) => {
 // ================= MENU ROUTES (عامة) =================
 
 // 1. جلب قائمة الطعام لتاجر معين (متاح للجميع)
-app.get('/api/menu', async (req, res) => {
+publicRoutes.get('/menu', async (req, res) => {
     const { vendorId } = req.query;
     const filter = vendorId ? { vendorId } : {};
     try {
@@ -450,6 +448,9 @@ app.get('/api/menu', async (req, res) => {
         res.json(menu);
     } catch (error) { res.status(500).json({ error: "Failed to fetch menu" }); }
 });
+
+// 🔥🔥 تطبيق المسارات العامة أولاً (لن تخضع للحماية) 🔥🔥
+app.use('/api', publicRoutes);
 
 
 // ----------------------------------------------------
@@ -710,7 +711,7 @@ protectedRoutes.get('/orders', async (req, res) => {
     } catch (error) { res.status(500).json({ error: "Failed to fetch orders" }); }
 });
 
-// 🔥 ربط الـ Router المحمي بالمسار /api 🔥
+// 🔥🔥 تطبيق المسارات المحمية ثانياً 🔥🔥
 app.use('/api', protectedRoutes);
 
 
