@@ -20,9 +20,9 @@ const protectedRoutes = express.Router();
 
 // إعدادات المتغيرات البيئية
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost/filo_super_app';
-const JWT_SECRET = process.env.JWT_SECRET || 'YOUR_JWT_SECRET_KEY';
-const API_KEY = process.env.API_KEY || 'FiloSecretKey202512341234'; 
+const MONGO_URI = process.env.MONGO_URI;
+const JWT_SECRET = process.env.JWT_SECRET;
+const API_KEY = process.env.API_KEY; 
 
 // الاتصال بقاعدة البيانات
 mongoose.connect(MONGO_URI)
@@ -68,6 +68,10 @@ const userSchema = new mongoose.Schema({
         description: String,
         logoUrl: String,
         isOpen: { type: Boolean, default: true },
+        // 🔥🔥 إضافة حقول ساعات العمل الجديدة 🔥🔥
+        openTime: { type: String, default: '09:00' }, 
+        closeTime: { type: String, default: '22:00' }, 
+        // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
     }
 });
 userSchema.pre('save', async function() {
@@ -407,19 +411,32 @@ app.get('/api/categories', async (req, res) => {
 });
 
 
-// ================= VENDORS ROUTES (عامة - مع الفرز) =================
+// ================= VENDORS ROUTES (عامة - مع الفرز والفلترة) =================
 
 // 1. جلب التجار (متاح للجميع)
 app.get('/api/vendors', async (req, res) => {
-    const { sortBy } = req.query; 
+    // 🔥🔥 استخلاص كل من sortBy و category من الـ query 🔥🔥
+    const { sortBy, category } = req.query; 
+    
+    // الفلترة الأساسية: Role = Vendor & Store Open
     let filter = { role: 'vendor', 'storeInfo.isOpen': true };
     let sortOptions = {}; 
+
+    // تطبيق فلترة الفئة إذا كانت موجودة (افتراضاً لديك حقل ربط)
+    // إذا كنت لا تملك حقل ربط في UserSchema (مثل categoryKey)، قم بإلغاء هذا الجزء.
+    // **ملاحظة:** بناءً على الكود الذي قدمته، لا يوجد حقل 'categoryKey' في userSchema، 
+    // لذا سنبقي الفلترة فقط على الدور والحالة، وسيقوم الـ Client-side بعمل الفلترة النهائية.
+    /*
+    if (category) {
+        filter['categoryKey'] = category; // تحتاج إلى هذا الحقل في المخطط إذا استخدمته
+    }
+    */
 
     // 🔥 منطق تحديد الفرز 🔥
     if (sortBy === 'rating') {
         sortOptions = { averageRating: -1 }; 
     } else if (sortBy === 'popular') {
-        sortOptions = { ordersCount: -1 }; 
+        sortOptions = { ordersCount: -1 }; // يعتمد على ordersCount
     } else {
         sortOptions = { name: 1 }; // الافتراضي
     }
